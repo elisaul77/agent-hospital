@@ -172,8 +172,18 @@ Hospital de agentes se diseñó con [subagent-pool](https://github.com/elisaul77
 consejo de cuatro miembros para las decisiones abiertas e implementación por fases con revisión. Los resultados de esos
 consejos y el plan están en [`docs/design/`](docs/design/) como ejemplo real de salida de planificación.
 
+## Fundamento: medicina → orquestación agéntica
+
+El flujo de subagent-pool (triaje, diagnóstico con falsador, consulta frente a consejo, expediente y alta) toma su
+estructura de la medicina hospitalaria. Estado del arte y fuentes, en [`docs/estado-del-arte.md`](docs/estado-del-arte.md)
+(revisión preliminar, no es un paper). Diseños de referencia: [caso (case-flow)](https://github.com/elisaul77/Orquestacion_Agentes_claude/blob/master/docs/proposals/case-flow.md)
+y [flujo v9.12](https://github.com/elisaul77/Orquestacion_Agentes_claude/blob/master/docs/proposals/flujo-v9-12.html).
+Trabajos externos: [MOLT Sinai (Cockroach Labs)](https://www.cockroachlabs.com/blog/experiment-running-hospital-code/) y
+[MDAgents (NeurIPS 2024)](https://proceedings.neurips.cc/paper_files/paper/2024/file/90d1fc07f46e31387978b88e7e057a31-Paper-Conference.pdf).
+
 ## Documentación
 
+- [`docs/estado-del-arte.md`](docs/estado-del-arte.md): medicina → orquestación agéntica (revisión preliminar).
 - [`CHANGELOG.md`](CHANGELOG.md): historial de versiones.
 - [`docs/design/`](docs/design/): plan y decisiones de los consejos (4b, 5b1, 5c). Rutas personales sustituidas por marcadores.
 - [`design/codex-astra/`](design/codex-astra/): propuesta visual de referencia (rediseño de Codex), con su propio README.
