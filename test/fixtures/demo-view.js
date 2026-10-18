@@ -1,0 +1,7 @@
+// Local, deterministic visual simulation. Never publishes or mutates server state.
+export function demoView(now, tick=0){
+ const roles=[['conductor','reception'],['planning','diagnosis'],['implement','operating'],['review','radiology'],['architect','architect'],['consultant','specialists'],['consultant','triage'],['council-spec','council'],['council-architect','council'],['council-lateral','council'],['council-risk','council'],['consultant','casefile']];
+ const agents={};roles.forEach(([role,room],i)=>{const agentId=`night-${i}`;agents[agentId]={agentId,sessionId:'simulation',caseId:'CASE-028',subagentType:role,role,room:i===5&&tick%2?'diagnosis':room,status:'working',tool:i<7?{name:['Agent','Read','Bash','Read','Write','Grep','Read'][i],label:'',toolUseId:`tool-${i}`,t:now}:null,reviewer:role==='review',parentAgentId:i?'night-0':null,description:'Simulación local',toolUseId:null,lastT:now,sleeping:false,stalled:false}});
+ const cases={};for(const [i,room] of ['operating','radiology','discharge'].entries()){const caseId=`CASE-0${28+i}`;cases[caseId]={caseId,room,tier:['L','M','S'][i],caseKind:'feature',status:i===2?'discharged':'active',phasesDone:i+1,verdict:null,fileStatus:'IN_PROGRESS',lastT:now,warnings:i===1?[{id:'w1',batch:1,phase:1,text:'Simulation warning',state:'acceptable',ruledT:null},{id:'w2',batch:1,phase:1,text:'Simulation warning',state:'open',ruledT:null}]:[],warningSeq:i===1?2:0,batchSeq:1,held:i===1?'discharge':null,pendingClose:null,revisions:0,escalated:false}}
+ return {t:now,now,agents,cases,messages:[]};
+}

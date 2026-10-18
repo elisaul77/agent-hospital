@@ -1,0 +1,16 @@
+# Live mode: reads the Claude Code transcripts and case files from the host, read-only.
+# Use together with the base file:
+#   docker compose -f docker-compose.yml -f compose.live.yml up -d --build
+# The container runs as UID 1000: the mounted files must be readable by that UID.
+services:
+  hospital:
+    environment:
+      HOSPITAL_MODE: live
+      # Roots whose plans/*-state.md may be read (colon-separated container paths). Each must have a :ro bind below.
+      HOSPITAL_CASE_DIRS: ${HOSPITAL_CASE_DIRS:-${HOME}/Documentos/Docker:${HOME}/Documentos/IA}
+    volumes:
+      # Transcripts are read-only. Never make this writable.
+      - ${HOME}/.claude/projects:/data/projects:ro
+      # Case files: explicit read-only project mounts. Container path = host path, so a transcript cwd resolves as is.
+      - ${HOME}/Documentos/Docker:${HOME}/Documentos/Docker:ro
+      - ${HOME}/Documentos/IA:${HOME}/Documentos/IA:ro

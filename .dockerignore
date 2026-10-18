@@ -1,0 +1,12 @@
+# The image needs package.json, src, public and (test stage) test. Keep everything else out of the build context.
+.git
+.gitignore
+.gitleaksignore
+.claude
+.env
+.env.*
+node_modules
+plans
+docs
+design
+*.log

@@ -1,0 +1,2 @@
+{"type":"user","uuid":"c-1","isSidechain":true,"agentId":"fixcodex1","sessionId":"sess-fixture-1","timestamp":"2026-10-18T10:00:07.500Z","message":{"role":"user","content":"mode=review SYNTHETIC CODEX PROMPT SECRET-DO-NOT-FORWARD"}}
+{"type":"assistant","uuid":"c-2","isSidechain":true,"agentId":"fixcodex1","sessionId":"sess-fixture-1","timestamp":"2026-10-18T10:00:08.000Z","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_fixture_hb_2","name":"SubagentHandback","input":{"message":"STATUS: APPROVED\nFAILURE_ORIGIN: none\n"}}]}}

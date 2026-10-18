@@ -1,0 +1,7 @@
+{
+  "agentType": "review-agent",
+  "description": "Revision fixture",
+  "toolUseId": "toolu_fixture_review_1",
+  "spawnDepth": 1,
+  "finished": true
+}

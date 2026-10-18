@@ -1,0 +1,19 @@
+# Local case files, real screenshots and council logs: kept on disk, never published.
+plans/
+
+# Dependencies and logs
+node_modules/
+*.log
+
+# Scratch and editor files
+scratch/
+*.tmp
+*.bak
+*.orig
+*~
+.DS_Store
+
+# Local environment and private settings
+.env
+.env.*
+.claude/

@@ -1,0 +1,23 @@
+services:
+  hospital:
+    build:
+      context: .
+      target: runtime
+    image: hospital-agentes:latest
+    container_name: hospital-agentes
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8700:8700"
+    environment:
+      HOSPITAL_MODE: ${HOSPITAL_MODE:-demo}
+      HOSPITAL_WINDOW_H: ${HOSPITAL_WINDOW_H:-6}
+      # Minutes without events before an idle Conductor walks out (and is dropped from storage). Invalid = 30 + a log line.
+      HOSPITAL_CONDUCTOR_IDLE_MIN: ${HOSPITAL_CONDUCTOR_IDLE_MIN:-30}
+      # Extra Host names allowed besides localhost/127.0.0.1/[::1] (comma-separated, no port). Empty = loopback only.
+      HOSPITAL_ALLOWED_HOSTS: ${HOSPITAL_ALLOWED_HOSTS:-}
+    # Demo by default: no host mounts. Live mode: docker compose -f docker-compose.yml -f compose.live.yml up -d --build
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8700/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
