@@ -1,0 +1,7 @@
+{
+  "agentType": "codex-agent",
+  "description": "Codex fixture",
+  "toolUseId": "toolu_fixture_codex_1",
+  "spawnDepth": 1,
+  "finished": true
+}

@@ -1,0 +1,8 @@
+{
+  "agentType": "architect5",
+  "description": "Council architect fixture",
+  "name": "architect5",
+  "spawnDepth": 0,
+  "customAgentType": "council-architect",
+  "spawnedAgentType": "council-architect"
+}

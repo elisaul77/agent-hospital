@@ -1,0 +1,4 @@
+test/fixtures/subagents/agent-fixrev1.jsonl:curl-auth-header:3
+test/archive.test.js:curl-auth-header:304
+test/archive.test.js:generic-api-key:283
+test/archive.test.js:jwt:285

@@ -1,0 +1,7 @@
+{
+  "agentType": "implement-agent",
+  "description": "Implementation fixture",
+  "toolUseId": "toolu_fixture_impl_1",
+  "spawnDepth": 1,
+  "finished": true
+}
