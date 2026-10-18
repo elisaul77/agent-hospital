@@ -9,6 +9,10 @@
 Pixel-art, read-only viewer that shows the agents of [subagent-pool](#hecho-con-subagent-pool) (Claude Code) working live, from local transcripts, in Docker.
 Unofficial and independent: not an Anthropic or OpenAI project.
 
+![Hospital de agentes en funcionamiento](docs/demo.gif)
+
+*Modo demo · datos sintéticos*
+
 **Una vista cenital en píxeles de los agentes de [subagent-pool](#hecho-con-subagent-pool).** Cada agente es un
 personaje, cada expediente una camilla y cada fase del plan un paciente. Node.js 22 sin dependencias, en Docker,
 solo lectura.
