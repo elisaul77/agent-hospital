@@ -1,4 +1,4 @@
-// Static hospital layout: 48x30 tiles of 16 px. Pure data + one builder, no DOM (imported by node:test too).
+// Logical hospital layout: 48x35 tiles of 16 px; rendered in isometric projection. Pure data + one builder, no DOM (imported by node:test too).
 // Bands: M mezzanine y1-4 | wall 5 | A rooms y6-13 | wall 14 | corridor 15-16 | wall 17 | B rooms y18-24 | wall 25 | corridor 26-27 | wall 28 | C rooms y29-33 | outer wall 34.
 
 export const TILE = 16;
@@ -9,6 +9,8 @@ export const T = { WALL: 0, FLOOR: 1, CORRIDOR: 2, DOOR: 3 };
 // Rows 1-4: DIRECTION mezzanine (glass wall over Reception, one door at [5,5]). Phase 4 moved the rest of the
 // hospital down 5 rows to make room; the grid is 48x35 instead of 48x30.
 export const ROOMS = [
+  { id: 'waiting', name: 'Sala de espera', rect: { x: 12, y: 1, w: 17, h: 4 }, floor: '#bcd2c5', accent: '#a7d8b8', doors: [[15, 5]],
+    seats: [[14, 3], [17, 3], [20, 3], [23, 3], [26, 3]] },
   { id: 'direction', name: 'Dirección', rect: { x: 1, y: 1, w: 10, h: 4 }, floor: '#2d2a24', accent: '#c9a24a', doors: [[5, 5]],
     seats: [[2, 1], [4, 1], [7, 1], [2, 4], [8, 4], [5, 3]] },
   { id: 'reception', name: 'Recepción', rect: { x: 1, y: 6, w: 10, h: 8 }, floor: '#1d3b3a', accent: '#5fd1c2', doors: [[5, 14]],

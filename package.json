@@ -2,7 +2,7 @@
   "name": "agent-hospital",
   "version": "0.1.0",
   "private": true,
-  "description": "Agent Hospital: top-down pixel view of subagent-pool agents",
+  "description": "Agent Hospital: isometric pixel view of subagent-pool agents",
   "license": "MIT",
   "repository": "https://github.com/elisaul77/agent-hospital",
   "type": "module",
