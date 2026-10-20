@@ -227,7 +227,8 @@ test('Host guard: HOSPITAL_ALLOWED_HOSTS admits listed LAN names (case-insensiti
 
 test('HOSPITAL_ALLOWED_HOSTS: an invalid entry is logged and ignored, never a boot failure', async () => {
   const lan = await startServer({ HOSPITAL_ALLOWED_HOSTS: 'good.lan,bad entry/x' });
-  assert.match(lan.stderr(), /HOSPITAL_ALLOWED_HOSTS entry ignored: bad entry\/x/);
+  assert.match(lan.stderr(), /HOSPITAL_ALLOWED_HOSTS entry ignored/);
+  assert.ok(!lan.stderr().includes('bad entry/x'), 'invalid host value stays out of logs');
   assert.equal((await get(lan.port, '/api/health', [['Host', 'good.lan:8700']])).status, 200);
   assert.equal((await get(lan.port, '/api/health', [['Host', 'bad.lan:8700']])).status, 421);
 });
@@ -250,14 +251,14 @@ test('Sec-Fetch-Site is not checked on static files (only /api/*)', async () => 
   assert.equal((await get(main.port, '/', [['Host', `127.0.0.1:${main.port}`], ['Sec-Fetch-Site', 'cross-site']])).status, 200);
 });
 
-test('Origin: a foreign or opaque origin is 403 on /api/*; a loopback origin on the same port passes', async () => {
+test('Origin: hostname and port must both match Host on /api/*', async () => {
   const h = (o) => [['Host', `127.0.0.1:${main.port}`], ['Origin', o]];
   for (const o of ['http://evil.test', 'null', 'http://localhost.evil.test:8700', 'ftp://localhost']) {
     assert.equal((await get(main.port, '/api/state', h(o))).status, 403, o);
   }
-  // Phase 5 hardening: the Origin port must equal the Host port (was: any loopback port passed).
-  assert.equal((await get(main.port, '/api/state', h(`http://localhost:${main.port}`))).status, 200);
-  assert.equal((await get(main.port, '/api/state', h(`http://[::1]:${main.port}`))).status, 200);
+  assert.equal((await get(main.port, '/api/state', h(`http://127.0.0.1:${main.port}`))).status, 200);
+  assert.equal((await get(main.port, '/api/state', h(`http://localhost:${main.port}`))).status, 403);
+  assert.equal((await get(main.port, '/api/state', h(`http://[::1]:${main.port}`))).status, 403);
 });
 
 test('Origin port must equal the Host port: a loopback origin on another port is 403 (hardening, Phase 5)', async () => {
@@ -414,7 +415,8 @@ test('a refusal leaves the server healthy and the listed docs still served', asy
 test('an invalid HOSPITAL_CONDUCTOR_IDLE_MIN logs a warning and boots with 30 min (never exits)', async () => {
   for (const raw of ['abc', '0', '-5']) {
     const srv = await startServer({ HOSPITAL_CONDUCTOR_IDLE_MIN: raw });
-    assert.match(srv.stderr(), new RegExp(`HOSPITAL_CONDUCTOR_IDLE_MIN=${raw}.*using 30`), raw);
+    assert.match(srv.stderr(), /HOSPITAL_CONDUCTOR_IDLE_MIN.*using 30/, raw);
+    assert.ok(!srv.stderr().includes(`HOSPITAL_CONDUCTOR_IDLE_MIN=${raw}`), 'invalid environment value stays private');
     assert.equal(srv.child.exitCode, null, raw);
   }
 });

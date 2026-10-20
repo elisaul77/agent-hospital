@@ -6,7 +6,7 @@ import { reduce, derive, EMPTY_STATE, IDLE_MS, LEAVE_MS, HANDBACK_TTL_MS, CONDUC
 
 const T = 1_000_000;
 const S = 'S';
-const run = (evs) => evs.reduce((s, ev) => reduce(s, ev), EMPTY_STATE());
+const run = (evs) => evs.reduce((s, ev) => reduce(s, ev), EMPTY_STATE({ trustedDemo: true }));
 const spawn = (agentId, subagentType, t = T) => ({ t, kind: 'agent_spawn', sessionId: S, agentId, subagentType });
 const done = (agentId, t) => ({ t, kind: 'agent_done', sessionId: S, agentId });
 

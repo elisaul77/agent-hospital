@@ -69,8 +69,13 @@ export function isConsult(subagentType, mode) {
 // Council members spawned under a free name (spec5, architect5, council-lateral-<task>...) fall back to the name.
 const COUNCIL_NAME_RE = /^(?:council-)?(spec|architect|lateral|risk)(?:[-\d].*)?$/;
 
-export function roleOf(subagentType, mode) {
+export function roleOf(subagentType, mode, workflow = 'subagent-pool') {
   if (isConsult(subagentType, mode)) return { role: 'consultant', room: 'specialists' };
+  // A name is not evidence that an ordinary skill convened the Council.
+  if (workflow !== 'subagent-pool' && (subagentType === 'conductor' || subagentType === 'AgentArchitect' || ROLE_BY_TYPE[subagentType]?.startsWith('council-')
+      || COUNCIL_NAME_RE.test(String(subagentType ?? '')))) {
+    return { role: 'consultant', room: 'specialists' };
+  }
   if (subagentType === 'codex-agent') {
     const room = mode === 'implement' ? 'operating' : mode === 'review' ? 'radiology' : 'specialists';
     return { role: 'codex', room };

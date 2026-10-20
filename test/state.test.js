@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { reduce, derive, EMPTY_STATE, IDLE_MS, STALL_MS, HANDBACK_TTL_MS, LEAVE_MS, CONDUCTOR_IDLE_MS } from '../src/state.js';
 
 const T0 = 1_000_000;
-const run = (events) => events.reduce((s, ev) => reduce(s, ev), EMPTY_STATE());
+const run = (events) => events.reduce((s, ev) => reduce(s, ev), EMPTY_STATE({ trustedDemo: true }));
 const spawn = (agentId, subagentType, t = T0, extra = {}) =>
   ({ t, kind: 'agent_spawn', sessionId: 's1', agentId, subagentType, ...extra });
 
@@ -355,7 +355,7 @@ test('1000 synthetic sessions: stored agents stay bounded and the storage emptie
     events.push({ t, kind: 'agent_spawn', sessionId: sid, agentId: `${sid}-c`, subagentType: 'council-spec', parentAgentId: sid });
   }
   const end = T0 + (SESSIONS - 1) * GAP + CONDUCTOR_IDLE_MS + LEAVE_MS + 60_000;
-  let s = EMPTY_STATE();
+  let s = EMPTY_STATE({ trustedDemo: true });
   let maxStored = 0;
   let next = 0;
   for (let tick = T0; tick <= end; tick += 2000) {

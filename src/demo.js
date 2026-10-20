@@ -39,6 +39,7 @@ export function caseSteps(sid, withAcceptable) {
   const impl2 = `${sid}-impl-2`, rev2 = `${sid}-rev-2`;
 
   const steps = [
+    S(0, (s) => ({ kind: 'workflow_confirmed', sessionId: s, workflow: 'subagent-pool', runtime: 'claude', reason: 'skill_invocation' })),
     S(800, (s) => ({ kind: 'triage', sessionId: s, tier: 'M', caseKind: 'feature', phases: DEMO_PHASES })),
     ...use(CONDUCTOR, 'Read', 'plans/hospital-plan.md', 1200),
     S(400, spawn(plan, 'planning-agent', 'Plan de fase')),
@@ -115,6 +116,7 @@ export function startDemo(emit, { gapMs = 6000 } = {}) {
 
   const fire = (ev) => emit({ t: Date.now(), ...ev });
 
+  fire({ kind: 'workflow_confirmed', sessionId: 'demo', workflow: 'subagent-pool', runtime: 'claude', reason: 'skill_invocation' });
   fire({ kind: 'agent_spawn', sessionId: 'demo', agentId: CONDUCTOR, subagentType: 'conductor', description: 'Conductor' });
 
   const runCycle = (steps, sid, i) => {

@@ -78,7 +78,7 @@ test('no WARNINGS_RULING line means no rulings', () => {
 // ---- reducer: the gate ----
 
 const T0 = 2_000_000;
-const run = (evs) => evs.reduce((s, ev) => reduce(s, ev), EMPTY_STATE());
+const run = (evs) => evs.reduce((s, ev) => reduce(s, ev), EMPTY_STATE({ trustedDemo: true }));
 const spawn = (agentId, subagentType) => ({ t: T0, kind: 'agent_spawn', sessionId: 'c1', agentId, subagentType, parentAgentId: 'main' });
 const open = (items, agentId = 'i1') => ({ t: T0 + 1, kind: 'warning_open', sessionId: 'c1', agentId, items });
 const rule = (label, index, ruling, agentId = 'r1') => ({ t: T0 + 2, kind: 'warning_ruling', sessionId: 'c1', agentId, label, index, ruling });
@@ -311,7 +311,7 @@ import { caseSteps } from '../src/demo.js';
 const conductor = { t: T0, kind: 'agent_spawn', sessionId: 'demo-x', agentId: 'main', subagentType: 'conductor' };
 
 const replay = (withAcceptable) => {
-  let s = reduce(EMPTY_STATE(), conductor);
+  let s = reduce(EMPTY_STATE({ trustedDemo: true }), conductor);
   for (const step of caseSteps('demo-x', withAcceptable)) {
     if (typeof step.make !== 'function') continue;
     s = reduce(s, { t: T0, ...step.make('demo-x') });
@@ -320,7 +320,7 @@ const replay = (withAcceptable) => {
 };
 
 test('demo scenario: must fix binds, held close waits, the ruling releases it into Discharge', () => {
-  let s = reduce(EMPTY_STATE(), conductor);
+  let s = reduce(EMPTY_STATE({ trustedDemo: true }), conductor);
   const seen = [];
   for (const step of caseSteps('demo-x', false)) {
     if (typeof step.make !== 'function') continue;
@@ -338,7 +338,7 @@ test('demo scenario: must fix binds, held close waits, the ruling releases it in
 
 test('demo scenario with an acceptable item: held without a signed risk line, never discharged', () => {
   // Phase 3 property, kept: only an ACCEPTED_RISK line (the risk_accepted event) lifts an acceptable item.
-  let s = reduce(EMPTY_STATE(), conductor);
+  let s = reduce(EMPTY_STATE({ trustedDemo: true }), conductor);
   for (const step of caseSteps('demo-x', true)) {
     if (typeof step.make !== 'function') continue;
     const ev = { t: T0, ...step.make('demo-x') };
@@ -354,7 +354,7 @@ test('demo scenario with an acceptable item: held without a signed risk line, ne
 
 test('demo scenario with an acceptable item: the signed risk line lifts the gate and the case is discharged', () => {
   // Phase 4: the demo signs the risk in the case file (risk_accepted); the held close then completes.
-  let s = reduce(EMPTY_STATE(), conductor);
+  let s = reduce(EMPTY_STATE({ trustedDemo: true }), conductor);
   let signedWhileHeld = false;
   for (const step of caseSteps('demo-x', true)) {
     if (typeof step.make !== 'function') continue;

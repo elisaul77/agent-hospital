@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseLine, normalizeLine, spawnEvents, verdictOf, modeOf, labelOf } from '../src/normalize.js';
+import { parseLine, normalizeLine, spawnEvents, verdictOf, modeOf, labelOf, opaqueToolId, ownerKey } from '../src/normalize.js';
 import { reduce, EMPTY_STATE } from '../src/state.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -20,31 +20,42 @@ test('noise line types are ignored, unknown types do not throw', () => {
   }
 });
 
-test('parent Agent tool_use registers its owner and forwards only description, never the prompt', () => {
+test('parent Agent tool_use registers its owner without forwarding description or prompt', () => {
   const owners = new Map();
   const [line] = readLines('session-main.jsonl').slice(2, 3).map(parseLine);
   const events = normalizeLine(line, { sessionId: 'sess-fixture-1', agentId: 'sess-fixture-1', isMain: true, owners });
-  assert.equal(owners.get('toolu_fixture_review_1'), 'sess-fixture-1');
+  assert.equal(owners.get(ownerKey('sess-fixture-1', 'toolu_fixture_review_1')), 'sess-fixture-1');
   const start = events.find((e) => e.kind === 'tool_start');
   assert.ok(start, 'tool_start emitted');
   assert.equal(start.tool, 'Agent');
-  assert.equal(start.label, 'Revision fixture');
-  assert.equal(start.toolUseId, 'toolu_fixture_review_1');
+  assert.equal(start.label, '');
+  assert.equal(start.toolUseId, opaqueToolId('toolu_fixture_review_1'));
   assert.equal(start.t, Date.parse('2026-10-18T10:00:05.000Z'));
   const text = JSON.stringify(events);
   for (const s of SECRETS) assert.ok(!text.includes(s), `leaked: ${s}`);
 });
 
+test('untrusted tool ids never leave the normalizer verbatim, but still pair with results', () => {
+  const secretId = 'SYNTHETIC_PRIVATE_TOOL_ID_SENTINEL_7301';
+  const ctx = { sessionId: 's', agentId: 's', isMain: false, owners: new Map() };
+  const assistant = normalizeLine({ type: 'assistant', timestamp: '2026-10-18T10:00:00Z',
+    message: { content: [{ type: 'tool_use', id: secretId, name: 'Read', input: {} }] } }, ctx);
+  const user = normalizeLine({ type: 'user', timestamp: '2026-10-18T10:00:01Z',
+    message: { content: [{ type: 'tool_result', tool_use_id: secretId, content: 'private result' }] } }, ctx);
+  assert.equal(assistant[0].toolUseId, user[0].toolUseId);
+  assert.ok(!JSON.stringify([...assistant, ...user]).includes(secretId));
+});
+
 test('spawn links the child to exactly one parent through meta.toolUseId', () => {
-  const owners = new Map([['toolu_fixture_review_1', 'sess-fixture-1']]);
+  const owners = new Map([[ownerKey('sess-fixture-1', 'toolu_fixture_review_1'), 'sess-fixture-1']]);
   const meta = JSON.parse(fs.readFileSync(path.join(FIX, 'subagents/agent-fixrev1.meta.json'), 'utf8'));
   const evs = spawnEvents({ sessionId: 'sess-fixture-1', agentId: 'fixrev1', meta, t: 1, owners });
   const spawn = evs.find((e) => e.kind === 'agent_spawn');
   const link = evs.find((e) => e.kind === 'agent_link');
   assert.equal(spawn.subagentType, 'review-agent');
   assert.equal(spawn.parentAgentId, 'sess-fixture-1');
-  assert.equal(spawn.description, 'Revision fixture');
-  assert.equal(link.toolUseId, 'toolu_fixture_review_1');
+  assert.equal(spawn.description, '');
+  assert.equal(link.toolUseId, opaqueToolId('toolu_fixture_review_1'));
   assert.equal(link.agentId, 'fixrev1');
 });
 
@@ -54,6 +65,13 @@ test('spawn without a known parent falls back to the session and emits no link (
   assert.equal(evs[0].parentAgentId, 's9');
 });
 
+test('a repeated tool id in another session cannot steal the parent link', () => {
+  const owners = new Map([[ownerKey('session-a', 'shared-tool'), 'child-a']]);
+  const [spawn] = spawnEvents({ sessionId: 'session-b', agentId: 'child-b',
+    meta: { agentType: 'planning-agent', toolUseId: 'shared-tool' }, t: 1, owners });
+  assert.equal(spawn.parentAgentId, 'session-b');
+});
+
 test('child tool_use forwards tool name and a safe label, tool_result closes the tool', () => {
   const owners = new Map();
   const ctx = { sessionId: 'sess-fixture-1', agentId: 'fixrev1', isMain: false, owners };
@@ -61,9 +79,9 @@ test('child tool_use forwards tool name and a safe label, tool_result closes the
   const bash = normalizeLine(lines[2], ctx);
   assert.equal(bash[0].kind, 'tool_start');
   assert.equal(bash[0].tool, 'Bash');
-  assert.equal(bash[0].label, 'Run fixture tests', 'Bash label is the description, not the command');
+  assert.equal(bash[0].label, '', 'Bash description and command are private');
   const end = normalizeLine(lines[3], ctx);
-  assert.deepEqual(end, [{ t: Date.parse('2026-10-18T10:00:09.000Z'), kind: 'tool_end', sessionId: 'sess-fixture-1', agentId: 'fixrev1', toolUseId: 'toolu_fixture_bash_1' }]);
+  assert.deepEqual(end, [{ t: Date.parse('2026-10-18T10:00:09.000Z'), kind: 'tool_end', sessionId: 'sess-fixture-1', agentId: 'fixrev1', toolUseId: opaqueToolId('toolu_fixture_bash_1') }]);
   const read = normalizeLine(lines[4], ctx)[0];
   assert.equal(read.tool, 'Read');
   assert.equal(read.label, 'src/state.js', 'file paths are cut to the last two segments');
@@ -117,6 +135,9 @@ test('labels are single-line and at most 60 characters', () => {
   const label = labelOf('Bash', { command: 'x', description: `line1\nline2 ${'y'.repeat(100)}` });
   assert.ok(label.length <= 60);
   assert.ok(!label.includes('\n'));
+  assert.equal(label, '');
+  assert.equal(labelOf('Grep', { pattern: 'SECRET-DO-NOT-FORWARD' }), '');
+  assert.equal(labelOf('Agent', { description: 'SECRET-DO-NOT-FORWARD' }), '');
   assert.equal(labelOf('Unknown', { anything: 'secret' }), '');
 });
 
@@ -136,7 +157,7 @@ test('fixture replay through the reducer: spawn, tools, FAILED handback moves th
   const meta = JSON.parse(fs.readFileSync(path.join(FIX, 'subagents/agent-fixrev1.meta.json'), 'utf8'));
   events.push(...spawnEvents({ sessionId: 'sess-fixture-1', agentId: 'fixrev1', meta, t: 0, owners }));
   for (const l of readLines('subagents/agent-fixrev1.jsonl')) events.push(...normalizeLine(parseLine(l), subCtx));
-  const state = events.reduce((s, ev) => reduce(s, ev), EMPTY_STATE());
+  const state = events.reduce((s, ev) => reduce(s, ev), EMPTY_STATE({ trustedDemo: true }));
   assert.equal(state.agents.fixrev1.parentAgentId, 'sess-fixture-1');
   assert.equal(state.agents.fixrev1.status, 'handback');
   assert.equal(state.cases['sess-fixture-1'].verdict, 'FAILED');
@@ -190,7 +211,7 @@ test('consult Bash git push is shown as a tool only, never as an approval reques
   const line = { type: 'assistant', timestamp: '2026-10-18T10:00:00.000Z', message: { content: [{ type: 'tool_use', id: 'tu2', name: 'Bash', input: { command: 'git push', description: 'Push' } }] } };
   const evs = normalizeLine(line, ctx);
   assert.equal(evs.some((e) => e.kind === 'approval_pending'), false);
-  assert.equal(evs.find((e) => e.kind === 'tool_start').label, 'Push');
+  assert.equal(evs.find((e) => e.kind === 'tool_start').label, '');
 });
 
 test('consult spawn forwards the specialty token and mode, nothing else from the prompt', () => {
@@ -200,4 +221,42 @@ test('consult spawn forwards the specialty token and mode, nothing else from the
   assert.equal(sp.mode, 'consult');
   assert.equal(sp.specialty, 'cost');
   assert.ok(!JSON.stringify(evs).includes('SYNTHETIC PROMPT'));
+});
+
+test('only an explicit Skill tool invocation confirms subagent-pool', () => {
+  const ctx = { sessionId: 'claude-test', agentId: 'claude-test', isMain: true, owners: new Map() };
+  const line = (name, input) => ({ type: 'assistant', timestamp: '2026-10-20T03:00:00Z',
+    message: { content: [{ type: 'tool_use', id: 'tool-1', name, input },
+      { type: 'text', text: 'subagent-pool SECRET-DO-NOT-FORWARD' }] } });
+  assert.equal(normalizeLine(line('Read', { skill: 'subagent-pool' }), ctx).some((e) => e.kind === 'workflow_confirmed'), false);
+  const confirmed = normalizeLine(line('Skill', { skill: 'subagent-pool', prompt: 'SECRET-DO-NOT-FORWARD' }), ctx);
+  assert.deepEqual(confirmed.filter((e) => e.kind === 'workflow_confirmed').map((e) =>
+    ({ workflow: e.workflow, runtime: e.runtime, reason: e.reason })),
+  [{ workflow: 'subagent-pool', runtime: 'claude', reason: 'skill_invocation' }]);
+  assert.ok(!JSON.stringify(confirmed).includes('SECRET-DO-NOT-FORWARD'));
+});
+
+test('SendMessage recipient uses the Claude namespace without forwarding the body', () => {
+  const ctx = { sessionId: 'claude-session', agentId: 'claude-sender', owners: new Map() };
+  const line = { type: 'assistant', timestamp: '2026-10-20T03:00:00Z', message: { content: [
+    { type: 'tool_use', id: 'send-1', name: 'SendMessage', input: { to: 'reviewer', message: 'SECRET-DO-NOT-FORWARD' } },
+  ] } };
+  const events = normalizeLine(line, ctx);
+  assert.equal(events.find((e) => e.kind === 'message_send').to, 'claude-reviewer');
+  assert.ok(!JSON.stringify(events).includes('SECRET-DO-NOT-FORWARD'));
+});
+
+test('free-form tool labels and child descriptions never expose a sentinel', () => {
+  const ctx = { sessionId: 'claude-s', agentId: 'claude-s', owners: new Map() };
+  const blocks = ['Bash', 'Grep', 'Glob', 'Agent', 'Task'].map((name, i) => ({ type: 'tool_use',
+    id: `tool-${i}`, name, input: { description: 'SECRET-DO-NOT-FORWARD', pattern: 'SECRET-DO-NOT-FORWARD',
+      command: 'SECRET-DO-NOT-FORWARD', prompt: 'SECRET-DO-NOT-FORWARD' } }));
+  const events = normalizeLine({ type: 'assistant', timestamp: '2026-10-20T03:00:00Z',
+    message: { content: blocks } }, ctx);
+  assert.deepEqual(events.filter((e) => e.kind === 'tool_start').map((e) => e.tool),
+    ['Bash', 'Grep', 'Glob', 'Agent', 'Task']);
+  assert.ok(!JSON.stringify(events).includes('SECRET-DO-NOT-FORWARD'));
+  assert.ok(!JSON.stringify(spawnEvents({ sessionId: 'claude-s', agentId: 'claude-c',
+    meta: { agentType: 'review-agent', description: 'SECRET-DO-NOT-FORWARD' }, t: 1,
+    owners: new Map() })).includes('SECRET-DO-NOT-FORWARD'));
 });

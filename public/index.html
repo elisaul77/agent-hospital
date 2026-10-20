@@ -46,12 +46,12 @@
 <body>
 <canvas id="world" aria-label="Hospital de agentes: arrastra para mover el mapa y usa los controles para ampliar"></canvas>
 <div id="vignette" aria-hidden="true"></div>
-<header class="topbar"><div class="brand"><span class="cross" aria-hidden="true">✚</span><div><h1>HOSPITAL <b>DE AGENTES</b></h1><small>SUBAGENT POOL · HOSPITAL VIVO</small></div></div><div class="connection"><strong><span class="dot">●</span> <span id="count">0 agentes</span></strong><small id="status" role="status">conectando…</small></div><div class="toolbar"><select id="session" hidden aria-label="Sesión a mostrar"></select><button id="details" aria-expanded="false">Casos</button><button id="archive-open" aria-haspopup="dialog">Archivo</button><button id="sound" aria-pressed="false">Campana: silencio</button></div></header>
+<header class="topbar"><div class="brand"><span class="cross" aria-hidden="true">✚</span><div><h1>HOSPITAL <b>DE AGENTES</b></h1><small id="brand-subtitle">SUBAGENT POOL · HOSPITAL VIVO</small></div></div><div class="connection"><strong><span class="dot">●</span> <span id="count">0 agentes</span></strong><small id="status" role="status">conectando…</small></div><div class="toolbar"><select id="session" hidden aria-label="Sesión a mostrar"></select><button id="details" aria-expanded="false">Casos</button><button id="archive-open" aria-haspopup="dialog">Archivo</button><button id="sound" aria-pressed="false">Campana: silencio</button></div></header>
 <div class="hud world-heading"><b><span class="dot">▪</span> <span id="camera-title">Hospital Central</span></b><small>Modo <span id="mode">…</span> · <span id="source-note">conectando</span></small></div>
-<section class="hud overview" aria-label="Resumen de expedientes"><small>✦ PARTE DE GUARDIA</small><strong id="case-summary">Esperando expedientes</strong><p id="phase-summary">El equipo se prepara para recibir casos.</p><div class="progress"><i id="phase-progress"></i></div></section>
+<section id="overview" class="hud overview" aria-label="Resumen de expedientes"><small>✦ PARTE DE GUARDIA</small><strong id="case-summary">Esperando expedientes</strong><p id="phase-summary">El equipo se prepara para recibir casos.</p><div class="progress"><i id="phase-progress"></i></div></section>
 <div class="hud view-controls" aria-label="Controles del mapa"><button id="minus" aria-label="Alejar">−</button><button id="reset" aria-label="Vista general" title="Vista general">⌂</button><button id="plus" aria-label="Acercar">+</button><span id="zoom">100%</span></div>
 <button id="bell" hidden aria-live="assertive" title="Ir a la sala del aviso"></button>
-<div class="stats"><span>♙ <b id="stat-agents">0</b> agentes</span><span>▤ <b id="stat-cases">0</b> casos</span><span>♡ <b id="stat-done">0</b> fases hechas</span><span>◷ <b id="stat-waiting">0</b> en espera</span></div>
+<div class="stats"><span>♙ <b id="stat-agents">0</b> agentes</span><span id="case-stats"><span>▤ <b id="stat-cases">0</b> casos</span><span>♡ <b id="stat-done">0</b> fases hechas</span><span>◷ <b id="stat-waiting">0</b> en espera</span></span></div>
 <aside id="character-card" class="character-card" hidden><button id="character-close" aria-label="Cerrar ficha">×</button><small>ACTIVIDAD DEL AGENTE</small><h2 id="character-name"></h2><p id="character-info"></p></aside>
 <nav class="departments" id="departments" aria-label="Visitar oficinas y salas"></nav>
 <aside class="hud" id="inspector"><span>PARTE DE GUARDIA</span><ul id="cases"></ul><h2>Eventos</h2><ul id="log"></ul></aside>
@@ -73,7 +73,7 @@
 <img id="archive-img" alt="Captura del expediente" hidden>
 </div>
 </section>
-<footer class="bottom-bar"><div class="mode-picker"><a href="?mode=demo" id="mode-demo">Demo</a><a href="?mode=live" id="mode-live">En vivo</a></div><span id="activity">equipo en servicio</span><span class="hint">ARRASTRA PARA EXPLORAR · RUEDA PARA ZOOM · CLIC PARA INSPECCIONAR</span><button id="fullscreen" aria-label="Pantalla completa">⛶</button></footer>
+<footer class="bottom-bar"><div class="mode-picker"><a href="?mode=demo" id="mode-demo">Demo</a><a href="?mode=live" id="mode-live">En vivo</a></div><span id="activity">equipo en servicio</span><span id="session-badges" aria-label="Sesiones visibles"></span><span class="hint">ARRASTRA PARA EXPLORAR · RUEDA PARA ZOOM · CLIC PARA INSPECCIONAR</span><button id="fullscreen" aria-label="Pantalla completa">⛶</button></footer>
 <script type="module" src="/js/main.js"></script>
 </body>
 </html>

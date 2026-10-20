@@ -1,8 +1,8 @@
 {
   "name": "agent-hospital",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Agent Hospital: isometric pixel view of subagent-pool agents",
+  "description": "Agent Hospital: read-only isometric view of Claude Code and Codex agents",
   "license": "MIT",
   "repository": "https://github.com/elisaul77/agent-hospital",
   "type": "module",
