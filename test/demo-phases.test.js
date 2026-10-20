@@ -7,7 +7,7 @@ import { EMPTY_STATE, reduce, derive } from '../src/state.js';
 import { specialtyDeskOf } from '../public/js/patients.js';
 
 test('demo shows waiting, current and done patients, and a consult at its specialty desk', () => {
-  let state = EMPTY_STATE();
+  let state = EMPTY_STATE({ trustedDemo: true });
   const seen = new Set();
   const consults = [];
   let t = 1_000_000;

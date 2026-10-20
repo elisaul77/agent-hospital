@@ -6,7 +6,7 @@ import { reduce, EMPTY_STATE, STALL_MS } from '../src/state.js';
 import { approvalActionOf, approvalOfHandback, isBlockedHandback, ESCALATION_LABEL } from '../src/escalation.js';
 
 const S = 'case-1';
-const run = (events) => events.reduce((s, ev) => reduce(s, ev), EMPTY_STATE());
+const run = (events) => events.reduce((s, ev) => reduce(s, ev), EMPTY_STATE({ trustedDemo: true }));
 const reasons = (s) => s.escalations.map((e) => e.reason);
 
 test('every escalation reason has a label, including unruled', () => {

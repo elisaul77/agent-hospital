@@ -30,6 +30,7 @@
 // ruling is NEEDS_REVISION. Revisions beyond MAX_REVISIONS escalate the case to reception.
 
 import { roleOf, isConsult, specialtyToken } from './roles.js';
+import { RUNTIMES, POOL_REASONS } from './workflow.js';
 import { sanitize, WARNING_TEXT_MAX, WARNING_ITEMS_MAX } from './warnings.js';
 import { ESCALATION_LABEL } from './escalation.js';
 import { ACCEPTED_MAX, normalizePhases } from './casefile.js';
@@ -61,8 +62,21 @@ const BLOCKING = new Set(['open', 'unruled', 'acceptable', 'must_fix']);
 const RULABLE = new Set(['open', 'unruled', 'must_fix']);
 const RULING_STATE = { fixed: 'fixed', acceptable: 'acceptable', must_fix: 'must_fix' };
 
-export function EMPTY_STATE() {
-  return { t: 0, agents: {}, cases: {}, messages: [], escalations: [], question: null, userT: 0 };
+export function EMPTY_STATE({ trustedDemo = false } = {}) {
+  return { t: 0, agents: {}, cases: {}, workflows: {}, messages: [], escalations: [], question: null, userT: 0, trustedDemo };
+}
+
+// Explicit legacy fixture bootstrap; live state defaults to unknown until confirmation.
+const workflowOf = (s, sessionId) => s.workflows[sessionId]?.workflow ?? (s.trustedDemo ? 'subagent-pool' : 'unknown');
+const isPool = (s, sessionId) => workflowOf(s, sessionId) === 'subagent-pool';
+function observeWorkflow(s, sessionId, workflow, runtime, reason = null) {
+  if (!sessionId || (workflow !== 'other' && workflow !== 'unknown')) return s;
+  const old = s.workflows[sessionId];
+  if (old?.workflow === 'subagent-pool' || (old?.workflow === 'other' && workflow === 'unknown')) return s;
+  const next = { workflow, runtime: RUNTIMES.has(runtime) ? runtime : old?.runtime ?? 'claude' };
+  if (reason) next.reason = reason;
+  s.workflows = { ...s.workflows, [sessionId]: next };
+  return s;
 }
 
 /**
@@ -79,7 +93,7 @@ export function parseConductorIdleMin(raw) {
   if (Number.isFinite(n) && n >= 1 && Number.isFinite(ms)) return { ms, minutes: n, warning: null };
   return {
     ...fallback,
-    warning: `HOSPITAL_CONDUCTOR_IDLE_MIN=${raw} is not a number of minutes >= 1 (finite); using ${CONDUCTOR_IDLE_MIN_DEFAULT}`,
+    warning: `HOSPITAL_CONDUCTOR_IDLE_MIN is not a number of minutes >= 1 (finite); using ${CONDUCTOR_IDLE_MIN_DEFAULT}`,
   };
 }
 
@@ -299,7 +313,11 @@ function progressRules(s, a, ev) {
 
 // Places an agent in its room (agent_spawn). Also used to re-create a session's Conductor (see reduce).
 function spawnAgent(s, ev) {
-  const { role, room } = roleOf(ev.subagentType, ev.mode);
+  if (ev.workflow === 'other' || ev.workflow === 'unknown') s = observeWorkflow(s, ev.sessionId, ev.workflow, ev.runtime, ev.reason);
+  const pool = isPool(s, ev.sessionId);
+  const main = ev.agentId === ev.sessionId;
+  const { role, room } = pool && main && ev.subagentType === 'assistant'
+    ? roleOf('conductor') : roleOf(ev.subagentType, ev.mode, workflowOf(s, ev.sessionId));
   // A consult is a specialist at its specialty desk (generic desk when the token is missing or invalid).
   const consult = isConsult(ev.subagentType, ev.mode);
   s.agents[ev.agentId] = {
@@ -308,24 +326,53 @@ function spawnAgent(s, ev) {
     reviewer: role === 'review' || (role === 'codex' && ev.mode === 'review'),
     consult, specialty: consult ? specialtyToken(ev.specialty) : null,
     parentAgentId: ev.parentAgentId ?? null, description: clip(ev.description), toolUseId: null, lastT: ev.t,
+    mode: ev.mode,
+    runtime: RUNTIMES.has(ev.runtime) ? ev.runtime : s.workflows[ev.sessionId]?.runtime ?? 'claude',
   };
+  if (!pool) return s;
   let c = ensureCase(s, ev.sessionId, ev.t);
   if (CASE_ROOM_BY_ROLE[role] && c.status === 'active') c = moveRoom(c, CASE_ROOM_BY_ROLE[role], ev.t);
   return evictCases(putCase(s, c));
 }
 
 export function reduce(state, ev) {
-  let s = { ...state, t: Math.max(state.t, ev.t ?? 0), agents: { ...state.agents }, messages: state.messages };
+  let s = { ...state, t: Math.max(state.t, ev.t ?? 0), agents: { ...state.agents }, workflows: state.workflows ?? {}, messages: state.messages };
+  if (ev.kind !== 'workflow_confirmed' && ev.kind !== 'workflow_observed'
+      && (ev.workflow === 'other' || ev.workflow === 'unknown')) {
+    s = observeWorkflow(s, ev.sessionId, ev.workflow, ev.runtime, ev.reason);
+  }
   // A question waits 15 s for an answer: any event but a tick or another question cancels it.
   if (ev.kind !== 'idle_tick' && ev.kind !== 'question') s.question = null;
   // Phase 3: a Conductor pruned while idle comes back with the first event of its session (main transcript: the
   // agent id is the session id). Any other unknown agent is still an error (requireAgent).
   if (ev.kind !== 'agent_spawn' && ev.kind !== 'idle_tick' && ev.sessionId && ev.agentId === ev.sessionId && !s.agents[ev.agentId]) {
-    s = spawnAgent(s, { t: ev.t, sessionId: ev.sessionId, agentId: ev.agentId, subagentType: 'conductor', description: 'Conductor', parentAgentId: null });
+    const pool = isPool(s, ev.sessionId);
+    s = spawnAgent(s, { t: ev.t, sessionId: ev.sessionId, agentId: ev.agentId,
+      subagentType: pool ? 'conductor' : 'assistant', workflow: workflowOf(s, ev.sessionId),
+      runtime: s.workflows[ev.sessionId]?.runtime, description: pool ? 'Conductor' : '', parentAgentId: null });
   }
   switch (ev.kind) {
+    case 'workflow_observed':
+      return ev.workflow === 'other' || ev.workflow === 'unknown'
+        ? observeWorkflow(s, ev.sessionId, ev.workflow, ev.runtime, ev.reason) : s;
+    case 'workflow_confirmed': {
+      if (ev.workflow !== 'subagent-pool') return s;
+      if (!ev.sessionId || !POOL_REASONS.has(ev.reason)) return s;
+      s.workflows = { ...s.workflows, [ev.sessionId]: { workflow: 'subagent-pool',
+        runtime: RUNTIMES.has(ev.runtime) ? ev.runtime : s.workflows[ev.sessionId]?.runtime ?? 'claude', reason: ev.reason } };
+      for (const [id, a] of Object.entries(s.agents)) {
+        if (a.sessionId !== ev.sessionId) continue;
+        const main = id === ev.sessionId;
+        const { role, room } = roleOf(main ? 'conductor' : a.subagentType, a.mode, 'subagent-pool');
+        s.agents[id] = { ...a, role, room, reviewer: role === 'review' || (role === 'codex' && a.mode === 'review'),
+          runtime: s.workflows[ev.sessionId].runtime };
+      }
+      return evictCases(putCase(s, ensureCase(s, ev.sessionId, ev.t)));
+    }
     case 'agent_spawn':
       return spawnAgent(s, ev);
+    case 'task_complete':
+      return s; // a parent turn ending is never a phase verdict
     case 'agent_link': {
       const a = requireAgent(s, ev.agentId);
       s.agents[ev.agentId] = { ...a, toolUseId: ev.toolUseId, lastT: ev.t };
@@ -362,7 +409,7 @@ export function reduce(state, ev) {
         ...(a.holdingAt ? {} : { leaving: true, goneAt: ev.t + LEAVE_MS }),
       };
       // A consult is a specialist: its handback never moves the case, never closes a phase, never rings the bell.
-      if (a.consult) return pruneHandback(s, ev.t);
+      if (a.consult || !isPool(s, a.sessionId)) return pruneHandback(s, ev.t);
       s = progressRules(s, a, ev);
       if (ev.blocked) s = addEscalation(s, a.sessionId, a.caseId, 'blocked', ev.t);
       if (ev.verdict) {
@@ -381,6 +428,7 @@ export function reduce(state, ev) {
       return pruneHandback(s, ev.t);
     }
     case 'approval_pending': {
+      if (!isPool(s, ev.sessionId)) return s;
       // A consult never rings Direction, whatever its Bash call or handback asked.
       if (ev.agentId && state.agents[ev.agentId]?.consult) return s;
       // A merge/push gate can come after review (even once discharged): Direction is asked whatever the status.
@@ -412,6 +460,7 @@ export function reduce(state, ev) {
       return s;
     }
     case 'case_counters': {
+      if (!isPool(s, ev.sessionId)) return s;
       // The case file's own counters escalate even without a transcript event. Repeats are deduped per reason.
       const c = ensureCase(s, ev.sessionId, ev.t);
       s = putCase(s, { ...c, lastT: ev.t });
@@ -422,10 +471,12 @@ export function reduce(state, ev) {
       return evictCases(s);
     }
     case 'question': {
+      if (!isPool(s, ev.sessionId)) return s;
       s.question = { sessionId: ev.sessionId, t: ev.t };
       return s;
     }
     case 'risk_accepted': {
+      if (!isPool(s, ev.sessionId)) return s;
       let c = ensureCase(s, ev.sessionId, ev.t);
       const accepted = (Array.isArray(ev.items) ? ev.items : []).slice(0, ACCEPTED_MAX)
         .map((a) => ({ item: sanitize(a?.item, 120), userWords: sanitize(a?.userWords, 80), date: String(a?.date ?? '') }))
@@ -439,6 +490,7 @@ export function reduce(state, ev) {
       return evictCases(putCase(s, settle(c, ev.t)));
     }
     case 'warning_open': {
+      if (!isPool(s, ev.sessionId)) return s;
       let c = ensureCase(s, ev.sessionId, ev.t);
       if (c.status !== 'active') return s; // a closed case does not reopen
       const items = (Array.isArray(ev.items) ? ev.items : [])
@@ -453,6 +505,7 @@ export function reduce(state, ev) {
       return evictCases(putCase(s, c));
     }
     case 'warning_ruling': {
+      if (!isPool(s, ev.sessionId)) return s;
       const ruling = RULING_STATE[ev.ruling];
       if (!ruling) throw new Error(`unknown ruling: ${ev.ruling}`);
       let c = ensureCase(s, ev.sessionId, ev.t);
@@ -465,6 +518,7 @@ export function reduce(state, ev) {
       return evictCases(putCase(s, settle(c, ev.t)));
     }
     case 'triage': {
+      if (!isPool(s, ev.sessionId)) return s;
       let c = ensureCase(s, ev.sessionId, ev.t);
       c = { ...c, tier: ev.tier, caseKind: clip(ev.caseKind, 40), lastT: ev.t };
       // The plan's phases (Phase 4b). An absent key keeps the plan as it was.
@@ -479,6 +533,7 @@ export function reduce(state, ev) {
       return evictCases(putCase(s, c));
     }
     case 'case_status': {
+      if (!isPool(s, ev.sessionId)) return s;
       let c = ensureCase(s, ev.sessionId, ev.t);
       c = { ...c, fileStatus: clip(ev.status, 40), lastT: ev.t };
       if (ev.status === 'STOPPED' && (c.status === 'active' || c.status === 'escalated')) {
@@ -502,7 +557,7 @@ export function reduce(state, ev) {
       for (const [id, a] of Object.entries(s.agents)) {
         if (!a.tool || a.tool.stallRung || ev.t - a.tool.t <= STALL_MS) continue;
         s.agents[id] = { ...a, tool: { ...a.tool, stallRung: true } };
-        s = addEscalation(s, a.sessionId, a.caseId, 'stall', ev.t);
+        if (isPool(s, a.sessionId)) s = addEscalation(s, a.sessionId, a.caseId, 'stall', ev.t);
       }
       return s;
     }
@@ -567,8 +622,7 @@ export function derive(state, now, { conductorIdleMs = CONDUCTOR_IDLE_MS } = {})
     };
   }
   return {
-    t: state.t, now, agents, cases: casesView(state.cases), messages: state.messages,
+    t: state.t, now, agents, cases: casesView(state.cases), workflows: state.workflows ?? {}, messages: state.messages,
     escalations: state.escalations, userT: state.userT,
   };
 }
-
