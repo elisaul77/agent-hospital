@@ -13,7 +13,7 @@ Unofficial and independent: not an Anthropic or OpenAI project.
 
 *Modo demo · datos sintéticos*
 
-**Una vista cenital en píxeles de los agentes de [subagent-pool](#hecho-con-subagent-pool).** Cada agente es un
+**Una vista isométrica en píxeles de los agentes de [subagent-pool](#hecho-con-subagent-pool).** Cada agente es un
 personaje, cada expediente una camilla y cada fase del plan un paciente. Node.js 22 sin dependencias, en Docker,
 solo lectura.
 
@@ -24,7 +24,7 @@ subagent-pool (Conductor, planning, implement, review, consejo…)
 ~/.claude/projects/  ──(montaje :ro)──►  servidor Node 22: tail → normalizar → reducir
 expedientes plans/*-state.md ──(:ro)──►        │  SSE /events
                                                ▼
-                                 navegador: Canvas 2D, una sala por rol
+                                 navegador: Canvas 2D isométrico, una sala por rol
 ```
 
 ---
@@ -41,13 +41,14 @@ Capturas en modo demo, con datos sintéticos (`docs/screenshots/`):
 
 | Vista general | Zoom al Consejo (`?freezeScene=council`) | Archivo del caso (expediente de prueba) |
 |---|---|---|
-| ![Vista general](docs/screenshots/overview.png) | ![Consejo](docs/screenshots/council-zoom.png) | ![Archivo](docs/screenshots/archive-viewer.png) |
+| ![Vista isométrica](docs/screenshots/overview.png) | ![Consejo](docs/screenshots/council-zoom.png) | ![Archivo](docs/screenshots/archive-viewer.png) |
 
 ## Cómo se mapea subagent-pool a las salas
 
 | En subagent-pool | Sala | Qué se ve |
 |---|---|---|
 | Conductor | Recepción | Recibe el encargo; la campana de escalado está en su mostrador |
+| Fases aún no iniciadas | Sala de espera | Una ficha por paciente pendiente, agrupadas por expediente |
 | planning-agent | Diagnóstico | Redacta el plan: cada fase del plan es un paciente |
 | implement-agent | Quirófano | Implementa la fase en curso |
 | review-agent | Radiología / Revisión | Revisa; los avisos (warnings) bloquean la salida del paciente |
@@ -94,7 +95,7 @@ Parámetros de consulta (solo para pruebas y capturas; no envían nada al servid
 | `session=<id>` | Sesión concreta (solo `live`) |
 | `freeze=<Herramienta>` | Congela el reloj y muestra el equipo de esa herramienta |
 | `freezeWarn=<fixed\|must_fix\|acceptable\|held>` | Un expediente fijo en ese estado de aviso |
-| `freezeScene=<waiting\|consult\|council\|tube\|accepted\|direction\|direction-answered>` | Escena fija con zoom ≥ 300 % |
+| `freezeScene=<waiting\|consult\|council\|tube\|accepted\|direction\|direction-answered>` | Escena fija con zoom de hasta 250 % |
 
 ## Variables de entorno
 
@@ -193,7 +194,7 @@ Trabajos externos: [MOLT Sinai (Cockroach Labs)](https://www.cockroachlabs.com/b
 - Conceptos inspirados en [pablodelucca/pixel-agents](https://github.com/pablodelucca/pixel-agents),
   [YehudaLevi/pixelagents](https://github.com/YehudaLevi/pixelagents) e [IvanWng97/pixtuoid](https://github.com/IvanWng97/pixtuoid).
   Solo los conceptos; no se copió código de esos proyectos.
-- Rediseño visual con Codex (OpenAI), en `design/codex-astra/`.
+- Diseño original con Codex (OpenAI), en `design/codex-astra/`. La vista isométrica actual adapta la referencia HTML aportada por el usuario y mantiene los datos reales de subagent-pool.
 
 ## Licencia
 

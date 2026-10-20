@@ -5,10 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hospital de agentes</title>
 <link id="favicon" rel="icon" href="data:,">
-<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
-<style>
-*{box-sizing:border-box}body{margin:0;background:#101b30;color:#e2e1ca;font:20px 'VT323',monospace;overflow:hidden}canvas{position:fixed;inset:0;width:100%;height:100%;image-rendering:pixelated;cursor:grab;touch-action:none}canvas:active{cursor:grabbing}.hud{position:fixed;background:#142332ed;border:2px solid #405a63;box-shadow:4px 4px 0 #080f1b;padding:12px 18px}header{left:24px;top:22px;display:flex;align-items:center;gap:25px}h1{font:28px 'VT323',monospace;letter-spacing:2px;margin:0;color:#ffda91}small{font-size:16px;color:#92a7b3}.dot{color:#98d9ad}button,select{font:18px 'VT323',monospace;color:#dbe7dc;background:#263c49;border:1px solid #55717b;padding:6px 10px;cursor:pointer}button:hover,button:focus-visible{background:#48616b}nav{right:24px;top:22px;display:flex;gap:8px;align-items:center}footer{bottom:22px;left:24px;right:24px;display:flex;justify-content:space-between;gap:16px}.legend{color:#b6cacd}#status{color:#e7bd77}#mode{color:#c9dfe4}#inspector{right:24px;bottom:88px;width:250px;display:none;max-height:calc(100vh - 220px);overflow:auto}#inspector.open{display:block}#inspector h2{font:18px 'VT323',monospace;letter-spacing:1px;color:#ffda91;margin:6px 0 0}#cases,#log{margin:8px 0;padding:0;list-style:none;font-size:17px}#cases li,#log li{padding:8px 0;border-top:1px solid #39505c;overflow-wrap:anywhere}#cases li.empty,#log li.empty{color:#5d7770;font-style:italic;border-top:0}#log{color:#9fbbc5}#session{max-width:190px}#vignette{position:fixed;inset:0;pointer-events:none;opacity:0}#vignette.on{animation:bellpulse 2s ease-out}@keyframes bellpulse{0%{opacity:1;box-shadow:inset 0 0 0 0 rgba(242,180,74,.95)}100%{opacity:0;box-shadow:inset 0 0 180px 70px rgba(242,180,74,0)}}#bell{position:fixed;top:124px;left:24px;border-color:#f2b44a;color:#ffd58a;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#bell:not([hidden]){animation:bellglow 1.2s ease-in-out infinite}@keyframes bellglow{0%,100%{opacity:1}50%{opacity:.6}}@media(prefers-reduced-motion:reduce){#bell,#vignette.on{animation:none}} @media(max-width:780px){#bell{top:150px;left:10px}header{left:10px;top:10px;padding:8px}h1{font-size:21px}header small{display:none}nav{top:72px;left:10px;right:auto;padding:6px}footer{left:10px;right:10px;bottom:10px;font-size:16px}.legend{display:none}}
-</style>
+<meta name="theme-color" content="#2d344b">
+
 <style>
 /* Phase 5 (Archive room). Codex palette; phone (<=780px): full-width bottom sheet with 16px gutters. */
 [hidden]{display:none!important}
@@ -43,12 +41,19 @@
 #archive-shot-pos{color:#ffda91;min-width:4em}
 @media(max-width:780px){.archive{left:0;right:0;top:auto;bottom:0;transform:none;width:100%;max-width:100%;max-height:88vh;padding:16px;border-left:0;border-right:0;border-bottom:0;box-shadow:none}.archive-row{padding-right:76px}}
 </style>
+<link rel="stylesheet" href="/hospital.css">
 </head>
 <body>
 <canvas id="world" aria-label="Hospital de agentes: arrastra para mover el mapa y usa los controles para ampliar"></canvas>
 <div id="vignette" aria-hidden="true"></div>
-<header class="hud"><div><h1>HOSPITAL DE AGENTES</h1><small>GUARDIA NOCTURNA · modo <span id="mode">…</span></small></div><div><span class="dot">●</span> <span id="count">0 agentes</span><br><small id="status">conectando…</small></div></header>
-<nav class="hud" aria-label="Controles del mapa"><select id="session" hidden aria-label="Sesión a mostrar"></select><button id="minus" aria-label="Alejar">−</button><span id="zoom">100%</span><button id="plus" aria-label="Acercar">+</button><button id="reset">Centrar</button><button id="details" aria-expanded="false">Casos</button><button id="archive-open" aria-haspopup="dialog">Archivo</button><button id="sound" aria-pressed="false">Campana: silencio</button><button id="bell" hidden aria-live="assertive" title="Ir a la sala del aviso"></button></nav>
+<header class="topbar"><div class="brand"><span class="cross" aria-hidden="true">✚</span><div><h1>HOSPITAL <b>DE AGENTES</b></h1><small>SUBAGENT POOL · HOSPITAL VIVO</small></div></div><div class="connection"><strong><span class="dot">●</span> <span id="count">0 agentes</span></strong><small id="status" role="status">conectando…</small></div><div class="toolbar"><select id="session" hidden aria-label="Sesión a mostrar"></select><button id="details" aria-expanded="false">Casos</button><button id="archive-open" aria-haspopup="dialog">Archivo</button><button id="sound" aria-pressed="false">Campana: silencio</button></div></header>
+<div class="hud world-heading"><b><span class="dot">▪</span> <span id="camera-title">Hospital Central</span></b><small>Modo <span id="mode">…</span> · <span id="source-note">conectando</span></small></div>
+<section class="hud overview" aria-label="Resumen de expedientes"><small>✦ PARTE DE GUARDIA</small><strong id="case-summary">Esperando expedientes</strong><p id="phase-summary">El equipo se prepara para recibir casos.</p><div class="progress"><i id="phase-progress"></i></div></section>
+<div class="hud view-controls" aria-label="Controles del mapa"><button id="minus" aria-label="Alejar">−</button><button id="reset" aria-label="Vista general" title="Vista general">⌂</button><button id="plus" aria-label="Acercar">+</button><span id="zoom">100%</span></div>
+<button id="bell" hidden aria-live="assertive" title="Ir a la sala del aviso"></button>
+<div class="stats"><span>♙ <b id="stat-agents">0</b> agentes</span><span>▤ <b id="stat-cases">0</b> casos</span><span>♡ <b id="stat-done">0</b> fases hechas</span><span>◷ <b id="stat-waiting">0</b> en espera</span></div>
+<aside id="character-card" class="character-card" hidden><button id="character-close" aria-label="Cerrar ficha">×</button><small>ACTIVIDAD DEL AGENTE</small><h2 id="character-name"></h2><p id="character-info"></p></aside>
+<nav class="departments" id="departments" aria-label="Visitar oficinas y salas"></nav>
 <aside class="hud" id="inspector"><span>PARTE DE GUARDIA</span><ul id="cases"></ul><h2>Eventos</h2><ul id="log"></ul></aside>
 <section id="archive" class="hud archive" role="dialog" aria-modal="true" aria-labelledby="archive-title" hidden>
 <div class="archive-head"><h2 id="archive-title">ARCHIVO DEL CASO</h2><button id="archive-close" aria-label="Cerrar archivo">Cerrar</button></div>
@@ -68,7 +73,7 @@
 <img id="archive-img" alt="Captura del expediente" hidden>
 </div>
 </section>
-<footer class="hud"><span><span class="dot">◆</span> <span id="activity">equipo en servicio</span></span><span class="legend">◇ expediente / hilos = revisión pendiente · ◎ sello = riesgo firmado</span><small>ARRASTRAR · RUEDA PARA ZOOM</small></footer>
+<footer class="bottom-bar"><div class="mode-picker"><a href="?mode=demo" id="mode-demo">Demo</a><a href="?mode=live" id="mode-live">En vivo</a></div><span id="activity">equipo en servicio</span><span class="hint">ARRASTRA PARA EXPLORAR · RUEDA PARA ZOOM · CLIC PARA INSPECCIONAR</span><button id="fullscreen" aria-label="Pantalla completa">⛶</button></footer>
 <script type="module" src="/js/main.js"></script>
 </body>
 </html>

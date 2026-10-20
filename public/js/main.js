@@ -1,7 +1,7 @@
 // Wiring: SSE -> mirror state -> walking targets (A* on the static map) -> render loop + HUD.
-import { buildMap, ROOMS, W, H, TILE, walkable } from './map.js';
+import { buildMap, ROOMS, W, H, walkable } from './map.js';
 import { findPath } from './path.js';
-import { fitZoomOf } from './view.js';
+import { project, screenToTile, fitIsometric, WORLD } from './projection.js';
 import { exitTileOf } from './exit.js';
 import { connect } from './net.js';
 import { createRenderer } from './render.js';
@@ -39,7 +39,7 @@ const hudView = () => (SCENE ? SCENE.view : view);
 const canvas = document.getElementById('world');
 const map = buildMap();
 const renderer = createRenderer(canvas, map);
-// Camera in screen pixels: integer zoom 1x-4x keeps the pixel art crisp; small viewports pan the 1x map.
+// Camera in screen pixels; fractional zoom fits the isometric map and room buttons focus on each office.
 const camera = { x: 0, y: 0, scale: 1 };
 let zoom = 1;
 
@@ -124,47 +124,33 @@ function updateBell(silent) {
 function centerOnRoom(roomId) {
   const room = ROOMS.find((r) => r.id === roomId);
   if (!room) return;
-  camera.scale = zoom;
-  camera.x = Math.round(innerWidth / 2 - (room.rect.x + room.rect.w / 2) * TILE * zoom);
-  camera.y = Math.round(innerHeight / 2 - (room.rect.y + room.rect.h / 2) * TILE * zoom);
+  zoom = Math.max(fitZoom(), Math.min(2.5, (innerWidth - 60) / ((room.rect.w + room.rect.h) * 22)));
+  centerOnTile(room.rect.x + room.rect.w / 2, room.rect.y + room.rect.h / 2);
+  document.getElementById('camera-title').textContent = room.name;
+  for (const [id, button] of roomButtons) { button.classList.toggle('selected', id === roomId); button.setAttribute('aria-pressed', String(id === roomId)); }
 }
-
-// Scene aid: centre a tile (tile units) at a given zoom.
 function centerOnTile(tx, ty) {
+  const [x,y] = project(tx,ty,12);
   camera.scale = zoom;
-  camera.x = Math.round(innerWidth / 2 - tx * TILE * zoom);
-  camera.y = Math.round(innerHeight / 2 - ty * TILE * zoom);
+  camera.x = Math.round(innerWidth / 2 - x * zoom);
+  camera.y = Math.round((innerHeight - 36) / 2 - y * zoom);
+  zoomEl.textContent = `${Math.round(zoom * 100)}%`;
 }
-
 function applyScene() {
-  zoom = SCENE.zoom;
+  zoom = Math.min(2.5, SCENE.zoom);
   centerOnTile(SCENE.focus[0], SCENE.focus[1]);
-  zoomEl.textContent = `${zoom * 100}%`;
 }
-
-// Phase 5a: largest integer zoom (1x-4x) that fits the hospital beside the HUD frame. Used on load and by Centrar.
-function fitZoom() {
-  return fitZoomOf(innerWidth, innerHeight);
-}
-
+function fitZoom() { return fitIsometric(innerWidth, innerHeight); }
 function center() {
   camera.scale = zoom;
-  camera.x = Math.round((innerWidth - W * TILE * zoom) / 2);
-  camera.y = Math.round(100 + (innerHeight - 190 - H * TILE * zoom) / 2);
-  zoomEl.textContent = `${zoom * 100}%`;
+  camera.x = Math.round((innerWidth - WORLD.width * zoom) / 2);
+  camera.y = Math.round(92 + (innerHeight - 228 - WORLD.height * zoom) / 2);
+  zoomEl.textContent = `${Math.round(zoom * 100)}%`;
+  document.getElementById('camera-title').textContent = 'Hospital Central';
+  for (const [id, button] of roomButtons) { button.classList.toggle('selected', id === 'all'); button.setAttribute('aria-pressed', String(id === 'all')); }
 }
-
-function resize() {
-  canvas.width = innerWidth;
-  canvas.height = innerHeight;
-  zoom = fitZoom();
-  center();
-}
-
-function changeZoom(value) {
-  zoom = Math.max(1, Math.min(4, Math.round(value)));
-  center();
-}
+function resize() { canvas.width = innerWidth; canvas.height = innerHeight; zoom = fitZoom(); center(); }
+function changeZoom(value) { zoom = Math.max(.15, Math.min(3, value)); center(); }
 
 function showEmptyLog() {
   if (logEl.children.length) return;
@@ -228,6 +214,8 @@ async function init() {
   }
   currentMode = new URLSearchParams(location.search).get('mode') || defaultMode;
   modeEl.textContent = currentMode;
+  document.getElementById('source-note').textContent = currentMode === 'demo' ? 'datos sintéticos' : 'sesiones reales';
+  document.getElementById(currentMode === 'demo' ? 'mode-demo' : 'mode-live').setAttribute('aria-current', 'page');
   if (currentMode === 'live') {
     sessionEl.addEventListener('change', () => {
       currentSession = sessionEl.value || null;
@@ -339,6 +327,7 @@ function updateHud() {
   const agents = Object.values(v.agents);
   countEl.textContent = `${agents.length} agentes`;
   activityEl.textContent = `${Object.keys(v.cases).length} expedientes en planta`;
+  updateOverview(v);
   casesEl.replaceChildren();
   for (const c of Object.values(v.cases)) {
     const li = document.createElement('li');
@@ -382,8 +371,47 @@ function logEvent(ev) {
   while (logEl.children.length > LOG_MAX) logEl.lastChild.remove();
 }
 
-document.getElementById('plus').addEventListener('click', () => changeZoom(zoom + 1));
-document.getElementById('minus').addEventListener('click', () => changeZoom(zoom - 1));
+const roomButtons = new Map();
+const icons = { all:'▦', waiting:'◷', reception:'♙', triage:'✚', casefile:'▤', architect:'⌘', direction:'⚑', diagnosis:'◎', specialists:'✦', council:'♧', operating:'✂', radiology:'◉', discharge:'♡', stopped:'Ⅱ' };
+for (const room of [{id:'all', name:'Hospital'}, ...ROOMS]) {
+  const button = document.createElement('button'); button.type='button'; button.className='room-button';
+  button.setAttribute('aria-label', `Visitar ${room.name}`);
+  const icon=document.createElement('span');icon.className='room-icon';icon.textContent=icons[room.id];
+  const title=document.createElement('b');title.textContent=room.name;
+  const count=document.createElement('small');count.textContent=room.id==='all'?'VISTA GENERAL':'0 AGENTES';
+  button.appendChild(icon);button.appendChild(title);button.appendChild(count);
+  button.addEventListener('click',()=>{ if(room.id==='all'){zoom=fitZoom();center();}else centerOnRoom(room.id); });
+  roomButtons.set(room.id,button);document.getElementById('departments').appendChild(button);
+}
+let selectedAgent=null;
+function paintCharacter(v) {
+  if(!selectedAgent)return;
+  const a=v.agents[selectedAgent],card=document.getElementById('character-card');
+  if(!a){card.hidden=true;selectedAgent=null;return;}
+  card.hidden=false;document.getElementById('character-name').textContent=a.role || a.subagentType || a.agentId;
+  const room=ROOMS.find(r=>r.id===a.room)?.name || a.room;
+  document.getElementById('character-info').textContent=`${room} · ${a.status}${a.sleeping?' · en espera':''}${a.tool?'\n'+a.tool.name+(a.tool.label?': '+a.tool.label:''):''}`;
+}
+function pickCharacter(x,y) {
+  const hits=Object.values(hudView().agents).map(a=>{const p=positions[a.agentId];if(!p)return null;const [px,py]=project(p.x+.5,p.y+.5,28);return {a,d:Math.hypot(x-(camera.x+px*zoom),y-(camera.y+py*zoom))};}).filter(Boolean).sort((a,b)=>a.d-b.d);
+  if(!hits.length || hits[0].d>Math.max(15,25*zoom))return false;
+  selectedAgent=hits[0].a.agentId;paintCharacter(hudView());return true;
+}
+function updateOverview(v) {
+  const agents=Object.values(v.agents),cases=Object.values(v.cases),phases=cases.flatMap(c=>c.phases??[]);
+  const done=phases.filter(p=>p.state==='done').length,waiting=phases.filter(p=>p.state==='waiting').length;
+  for(const [id,n]of[['stat-agents',agents.length],['stat-cases',cases.length],['stat-done',done],['stat-waiting',waiting]])document.getElementById(id).textContent=String(n);
+  document.getElementById('case-summary').textContent=cases.length?`${cases.length} expedientes en atención`:'Sin expedientes activos';
+  document.getElementById('phase-summary').textContent=phases.length?`${done} de ${phases.length} fases hechas · ${waiting} en espera`:'Las fases aparecerán al recibir un plan.';
+  document.getElementById('phase-progress').style.width=`${phases.length?done/phases.length*100:0}%`;
+  for(const [id,button]of roomButtons){if(id==='all')continue;const count=button.children[2];count.textContent=`${agents.filter(a=>a.room===id&&!a.leaving).length} AGENTES`;}
+  paintCharacter(v);
+}
+document.getElementById('character-close').addEventListener('click',()=>{selectedAgent=null;document.getElementById('character-card').hidden=true;});
+document.getElementById('fullscreen').addEventListener('click',async()=>{try{if(document.fullscreenElement)await document.exitFullscreen();else await document.documentElement.requestFullscreen();}catch(e){console.error('[hospital] fullscreen:',e.message);}});
+
+document.getElementById('plus').addEventListener('click', () => changeZoom(zoom * 1.25));
+document.getElementById('minus').addEventListener('click', () => changeZoom(zoom / 1.25));
 document.getElementById('reset').addEventListener('click', () => { zoom = fitZoom(); center(); });
 bellEl.addEventListener('click', () => {
   const v = hudView();
@@ -407,7 +435,7 @@ detailsEl.addEventListener('click', () => {
 });
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  changeZoom(zoom + (e.deltaY < 0 ? 1 : -1));
+  changeZoom(zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15));
 }, { passive: false });
 let drag = null;
 canvas.addEventListener('pointerdown', (e) => {
@@ -424,8 +452,8 @@ canvas.addEventListener('pointermove', (e) => {
 canvas.addEventListener('pointerup', (e) => {
   if (!drag || drag.moved) return;
   const room = ROOMS.find((r) => r.id === ARCHIVE_ROOM);
-  const tx = (e.clientX - camera.x) / (TILE * camera.scale);
-  const ty = (e.clientY - camera.y) / (TILE * camera.scale);
+  if (pickCharacter(e.clientX, e.clientY)) return;
+  const { x: tx, y: ty } = screenToTile(e.clientX, e.clientY, camera);
   if (room && tx >= room.rect.x && tx < room.rect.x + room.rect.w && ty >= room.rect.y && ty < room.rect.y + room.rect.h) {
     archive.openList(null);
   }

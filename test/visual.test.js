@@ -71,7 +71,6 @@ test('renderer draws all rooms and roles with live bubbles, without mutating vie
   const before = JSON.stringify({ view, positions });
   const renderer = createRenderer(canvas, buildMap());
 
-  assert.ok(ROOMS.every((r) => log.text.includes(r.name)), 'all eleven room names are drawn as plaques');
   log.scales.length = 0;
   log.translates.length = 0;
   log.text.length = 0;
@@ -79,6 +78,7 @@ test('renderer draws all rooms and roles with live bubbles, without mutating vie
   canvas.width = 1600; // dimension reset between frames
   renderer.draw(view, positions, 1000, { camera: { x: 20, y: 40, scale: 2 } });
 
+  assert.ok(ROOMS.every((r) => log.text.includes(r.name)), 'all room names are drawn as plaques');
   assert.ok(log.smoothing.length > 0 && log.smoothing.every((v) => v === false), 'smoothing off at every drawImage');
   assert.ok(log.scales.length > 1);
   assert.ok(log.scales.every(Number.isInteger), 'camera and character scales are integers');
@@ -89,14 +89,14 @@ test('renderer draws all rooms and roles with live bubbles, without mutating vie
   assert.equal(JSON.stringify({ view, positions }), before);
 });
 
-test('HUD: snapshot and delta reach the DOM; zoom, reset, drag, details; integer zoom on desktop and mobile', async () => {
+test('HUD: snapshot and delta reach the DOM; zoom, reset, drag, details; isometric zoom on desktop and mobile', async () => {
   const log = newLog();
   const ctx = makeContext(log);
   const listeners = {};
   const elements = {};
   const makeElement = (id) => {
     const el = {
-      id, value: '', hidden: false, textContent: '', className: '', children: [], attrs: {}, open: false,
+      id, value: '', hidden: false, textContent: '', className: '', children: [], attrs: {}, open: false, style: {},
       parent: null,
       classList: { toggle: () => { el.open = !el.open; return el.open; } },
       addEventListener(type, fn) { listeners[`${id}:${type}`] = fn; },
@@ -159,18 +159,20 @@ test('HUD: snapshot and delta reach the DOM; zoom, reset, drag, details; integer
 
   runFrame(1000);
   runFrame(1016);
-  assert.equal(byId('zoom').textContent, '100%');
+  assert.match(byId('zoom').textContent, /%$/);
+  const beforeZoom=Number.parseInt(byId('zoom').textContent);
   click('plus');
-  assert.equal(byId('zoom').textContent, '200%');
+  assert.ok(Number.parseInt(byId('zoom').textContent)>beforeZoom);
   click('reset');
-  assert.equal(byId('zoom').textContent, '100%');
+  assert.equal(Number.parseInt(byId('zoom').textContent), beforeZoom);
 
   listeners['world:pointerdown']({ pointerId: 1, clientX: 10, clientY: 10 });
   listeners['world:pointermove']({ clientX: 30, clientY: 50 });
   listeners['world:pointerup']();
   log.translates.length = 0;
   runFrame(1032);
-  assert.deepEqual(log.translates[0], [Math.round((1600 - 768) / 2) + 20, Math.round(100 + (1100 - 190 - 35 * 16) / 2) + 40 /* H=35 rows since Phase 4 */],
+  const fitted = Math.min((1600 - 32) / 1694, (1100 - 228) / 947, 2);
+  assert.deepEqual(log.translates[0], [Math.round((1600 - 1694 * fitted) / 2) + 20, Math.round(92 + (1100 - 228 - 947 * fitted) / 2) + 40],
     'drag moves the camera by the pointer delta');
 
   click('details');
@@ -181,8 +183,8 @@ test('HUD: snapshot and delta reach the DOM; zoom, reset, drag, details; integer
   globalThis.innerHeight = 844;
   windowListeners.resize();
   runFrame(1048);
-  assert.equal(byId('zoom').textContent, '100%');
-  assert.ok(log.scales.every(Number.isInteger), 'integer zoom at desktop and mobile dimensions');
+  assert.match(byId('zoom').textContent, /%$/);
+  assert.ok(log.scales.every(Number.isFinite), 'finite zoom at desktop and mobile dimensions');
   assert.ok(log.translates.flat().every(Number.isInteger), 'integer camera offsets');
   assert.ok(log.smoothing.length > 0 && log.smoothing.every((v) => v === false), 'smoothing restored after resize');
 });
