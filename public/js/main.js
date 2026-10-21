@@ -38,6 +38,8 @@ const HOLD_ROOM = 'direction'; // a delegate that asked Direction walks to this 
 const hudView = () => (SCENE ? SCENE.view : view);
 const demoScene = () => currentMode !== 'live' || Boolean(SCENE);
 const roomSet = () => visibleRooms(hudView(), currentSession, { demo: demoScene() });
+const allRooms = new Set(ROOMS.map((room) => room.id));
+const displayRooms = () => overviewAll ? allRooms : roomSet();
 function sceneView() {
   const v = hudView();
   if (demoScene()) return v;
@@ -82,6 +84,7 @@ let es = null;
 let currentMode = null;
 let currentSession = null;
 let focusSignature = '';
+let overviewAll = false;
 
 // Escalation bell: sound is opt-in and persisted; the AudioContext is only created after a click (see below).
 const bellEl = document.getElementById('bell');
@@ -139,7 +142,7 @@ function updateBell(silent) {
 
 // Bell click: centre the camera on the room that holds the first waiting escalation.
 function centerOnRoom(roomId) {
-  if (!roomSet().has(roomId)) return;
+  if (!displayRooms().has(roomId)) return;
   const room = ROOMS.find((r) => r.id === roomId);
   if (!room) return;
   zoom = Math.max(fitZoom(), Math.min(2.5, (innerWidth - 60) / ((room.rect.w + room.rect.h) * 22)));
@@ -169,14 +172,14 @@ function focusBounds() {
     minY: Math.min(...points.map((p) => p[1])), maxY: Math.max(...points.map((p) => p[1])) };
 }
 function fitZoom() {
-  if (demoScene() || roomSet().size === ROOMS.length) return fitIsometric(innerWidth, innerHeight);
+  if (overviewAll || demoScene() || roomSet().size === ROOMS.length) return fitIsometric(innerWidth, innerHeight);
   const b = focusBounds();
   return Math.max(.15, Math.min(2.5, (innerWidth - 48) / (b.maxX - b.minX + 32),
     (innerHeight - 228) / (b.maxY - b.minY + 32)));
 }
 function center() {
   camera.scale = zoom;
-  if (!demoScene() && roomSet().size < ROOMS.length) {
+  if (!overviewAll && !demoScene() && roomSet().size < ROOMS.length) {
     const b = focusBounds();
     camera.x = Math.round(innerWidth / 2 - (b.minX + b.maxX) * zoom / 2);
     camera.y = Math.round(92 + (innerHeight - 228) / 2 - (b.minY + b.maxY) * zoom / 2);
@@ -185,7 +188,7 @@ function center() {
     camera.y = Math.round(92 + (innerHeight - 228 - WORLD.height * zoom) / 2);
   }
   zoomEl.textContent = `${Math.round(zoom * 100)}%`;
-  document.getElementById('camera-title').textContent = demoScene() || roomSet().size === ROOMS.length ? 'Hospital Central' : 'Actividad observada';
+  document.getElementById('camera-title').textContent = overviewAll || demoScene() || roomSet().size === ROOMS.length ? 'Hospital Central' : 'Actividad observada';
   for (const [id, button] of roomButtons) { button.classList.toggle('selected', id === 'all'); button.setAttribute('aria-pressed', String(id === 'all')); }
 }
 function resize() { canvas.width = innerWidth; canvas.height = innerHeight; zoom = fitZoom(); center(); }
@@ -213,6 +216,7 @@ function openStream() {
   selectedAgent = null;
   document.getElementById('character-card').hidden = true;
   focusSignature = '';
+  overviewAll = false;
   refreshFocus(true);
   updateHud();
   updateBell(true);
@@ -379,7 +383,7 @@ function step(now) {
   }
   const frozen = FREEZE_TOOL || FREEZE_WARN || SCENE;
   renderer.draw(WARN_VIEW ?? sceneView(), positions, frozen ? FREEZE_NOW : Date.now(),
-    { camera, freezeTool: FREEZE_TOOL, visibleRooms: demoScene() ? undefined : roomSet() });
+    { camera, freezeTool: FREEZE_TOOL, visibleRooms: demoScene() || overviewAll ? undefined : roomSet() });
   requestAnimationFrame(step);
 }
 
@@ -402,8 +406,11 @@ function updateHud() {
       badges.appendChild(badge);
     }
   }
-  countEl.textContent = `${agents.length} agentes`;
-  activityEl.textContent = focused ? `${agents.length} agentes en actividad` : `${Object.keys(v.cases).length} expedientes en planta`;
+  countEl.textContent = `${agents.length} ${agents.length === 1 ? 'agente' : 'agentes'}`;
+  const caseCount = Object.keys(v.cases).length;
+  activityEl.textContent = focused
+    ? `${agents.length} ${agents.length === 1 ? 'agente' : 'agentes'} en actividad`
+    : `${caseCount} ${caseCount === 1 ? 'expediente' : 'expedientes'} en planta`;
   updateOverview(v);
   casesEl.replaceChildren();
   for (const c of Object.values(v.cases)) {
@@ -461,7 +468,7 @@ for (const room of [{id:'all', name:'Hospital'}, ...ROOMS]) {
   const title=document.createElement('b');title.textContent=room.name;
   const count=document.createElement('small');count.textContent=room.id==='all'?'VISTA GENERAL':'0 AGENTES';
   button.appendChild(icon);button.appendChild(title);button.appendChild(count);
-  button.addEventListener('click',()=>{ if(room.id==='all'){zoom=fitZoom();center();}else centerOnRoom(room.id); });
+  button.addEventListener('click',()=>{ if(room.id==='all'){overviewAll=true;zoom=fitZoom();center();updateOverview(sceneView());}else centerOnRoom(room.id); });
   roomButtons.set(room.id,button);document.getElementById('departments').appendChild(button);
 }
 let selectedAgent=null;
@@ -485,8 +492,8 @@ function updateOverview(v) {
   document.getElementById('case-summary').textContent=cases.length?`${cases.length} expedientes en atención`:'Sin expedientes activos';
   document.getElementById('phase-summary').textContent=phases.length?`${done} de ${phases.length} fases hechas · ${waiting} en espera`:'Las fases aparecerán al recibir un plan.';
   document.getElementById('phase-progress').style.width=`${phases.length?done/phases.length*100:0}%`;
-  const visible = roomSet();
-  for(const [id,button]of roomButtons){if(id==='all')continue;button.hidden=!visible.has(id);const count=button.children[2];count.textContent=`${agents.filter(a=>a.room===id&&!a.leaving).length} AGENTES`;}
+  const visible = displayRooms();
+  for(const [id,button]of roomButtons){if(id==='all')continue;button.hidden=!visible.has(id);const count=button.children[2];const n=agents.filter(a=>a.room===id&&!a.leaving).length;count.textContent=`${n} ${n===1?'AGENTE':'AGENTES'}`;}
   paintCharacter(v);
 }
 document.getElementById('character-close').addEventListener('click',()=>{selectedAgent=null;document.getElementById('character-card').hidden=true;});
@@ -494,7 +501,7 @@ document.getElementById('fullscreen').addEventListener('click',async()=>{try{if(
 
 document.getElementById('plus').addEventListener('click', () => changeZoom(zoom * 1.25));
 document.getElementById('minus').addEventListener('click', () => changeZoom(zoom / 1.25));
-document.getElementById('reset').addEventListener('click', () => { zoom = fitZoom(); center(); });
+document.getElementById('reset').addEventListener('click', () => { overviewAll = true; zoom = fitZoom(); center(); updateOverview(sceneView()); });
 bellEl.addEventListener('click', () => {
   const v = sceneView();
   const e = (v.escalations ?? [])[0];

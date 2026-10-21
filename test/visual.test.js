@@ -279,7 +279,8 @@ test('live HUD focuses observed rooms and clears focus on session switch', async
   globalThis.innerWidth = 1200;
   globalThis.innerHeight = 900;
   globalThis.window = { addEventListener: () => {} };
-  globalThis.requestAnimationFrame = () => {};
+  let frame;
+  globalThis.requestAnimationFrame = (fn) => { frame = fn; };
   globalThis.EventSource = class {
     constructor(url) { this.url = url; this.handlers = {}; streams.push(this); }
     addEventListener(name, fn) { this.handlers[name] = fn; }
@@ -308,13 +309,19 @@ test('live HUD focuses observed rooms and clears focus on session switch', async
     assert.equal(roomButton('Alta').hidden, true);
     assert.equal(byId('overview').hidden, true);
     assert.equal(byId('case-stats').hidden, true);
-    assert.match(byId('activity').textContent, /agentes en actividad/);
+    assert.match(byId('activity').textContent, /1 agente en actividad/);
     assert.equal(byId('session-badges').children[0].textContent, 'Codex · 12345678');
     const fittedZoom = Number.parseInt(byId('zoom').textContent);
     listeners['plus:click']();
     assert.ok(Number.parseInt(byId('zoom').textContent) > fittedZoom, 'focused room still zooms on click');
     listeners['reset:click']();
-    assert.equal(Number.parseInt(byId('zoom').textContent), fittedZoom);
+    assert.ok(Number.parseInt(byId('zoom').textContent) < fittedZoom, 'Vista general fits the whole hospital');
+    assert.equal(roomButton('Consejo').hidden, false, 'Vista general exposes the Council room');
+    assert.equal(roomButton('Alta').hidden, false, 'Vista general exposes Discharge');
+    log.text.length = 0;
+    frame(1040); // initial animation callback installs the drawing loop
+    frame(1056);
+    assert.ok(log.text.includes('Consejo'), `Vista general draws the Council room on Canvas: ${log.text.slice(0,25).join(', ')}`);
     const leaving = snapshot('codex-12345678', 'diagnosis', 'codex');
     leaving.agents.one.status = 'handback';
     leaving.agents.one.leaving = true;

@@ -10,6 +10,9 @@ Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versiones 
   montadas en solo lectura. Los identificadores de sesión separan ambos programas.
 - Vista enfocada para sesiones ajenas a subagent-pool: muestra las salas pertinentes a la actividad observada;
   el hospital completo se reserva para sesiones con confirmación estructurada de subagent-pool.
+- «Vista general» muestra todas las habitaciones también en una sesión ordinaria; la vista enfocada conserva solo
+  las salas con actividad. Contadores en singular cuando hay un agente.
+- Banner y GIF de demo nuevos, documentación de Claude y Codex y enlace al expediente de subagent-pool.
 - Pruebas de clasificación, parentesco, aislamiento de sesiones y privacidad de eventos.
 - Asociación exacta del expediente de Codex mediante la cabecera `Hospital session`, para evitar activar el flujo
   completo con un expediente de otra sesión.
