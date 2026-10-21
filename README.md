@@ -6,6 +6,12 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ed.svg?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![Node](https://img.shields.io/badge/Node-22-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org/)
 
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub-Sponsors-pink?style=for-the-badge&logo=githubsponsors)](https://github.com/sponsors/elisaul77)
+[![PayPal](https://img.shields.io/badge/PayPal-Donate-blue?style=for-the-badge&logo=paypal)](https://paypal.me/eflorezp)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-yellow?style=for-the-badge&logo=buymeacoffee)](https://buymeacoffee.com/elisaul77)
+
+Creado y mantenido por **[Eli Saul Florez Perez (@elisaul77)](https://github.com/elisaul77)**, con asistencia de Claude y Codex.
+
 **El trabajo de los agentes, visto como un hospital vivo.** Un visor isométrico de solo lectura para Claude Code y Codex: personajes, oficinas, expedientes y fases que avanzan con la actividad real.
 
 [▶ Ver la demostración](docs/demo.gif) · [🚀 Instalar](#puesta-en-marcha) · [🧭 Entender las salas](#cómo-se-mapea-subagent-pool-a-las-salas) · [📚 Fundamentos y fuentes](docs/estado-del-arte.md)
@@ -217,6 +223,9 @@ Trabajos externos: [MOLT Sinai (Cockroach Labs)](https://www.cockroachlabs.com/b
 - [`design/codex-astra/`](design/codex-astra/): propuesta visual de referencia (rediseño de Codex), con su propio README.
 
 ## Créditos
+
+- **Autor y mantenedor:** [Eli Saul Florez Perez (@elisaul77)](https://github.com/elisaul77), responsable del concepto, la dirección del proyecto y su publicación.
+- **Asistencia de desarrollo:** Claude (Anthropic) y Codex (OpenAI).
 
 - Conceptos inspirados en [pablodelucca/pixel-agents](https://github.com/pablodelucca/pixel-agents),
   [YehudaLevi/pixelagents](https://github.com/YehudaLevi/pixelagents) e [IvanWng97/pixtuoid](https://github.com/IvanWng97/pixtuoid).
