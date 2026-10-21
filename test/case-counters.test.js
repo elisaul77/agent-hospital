@@ -11,7 +11,7 @@ import { reduce, EMPTY_STATE } from '../src/state.js';
 const S = 'case-counters';
 const T = 2_000_000;
 const counters = (reroutes, diagnosisRounds) => ({ t: T, kind: 'case_counters', sessionId: S, reroutes, diagnosisRounds });
-const apply = (ev) => reduce(EMPTY_STATE(), ev);
+const apply = (ev) => reduce(EMPTY_STATE({ trustedDemo: true }), ev);
 const reasons = (s) => s.escalations.map((e) => e.reason);
 
 test('parseCounters reads both counters from the header and null when absent', () => {

@@ -17,35 +17,48 @@ const PALETTES = {
  stopped:['#dbbaba','#f2d8cd','#b58b8a'],
 };
 
-function background(map) {
+function background(map, visible = null) {
  const c=document.createElement('canvas'); c.width=WORLD.width;c.height=WORLD.height;
  const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=false;
  const a=createArt(ctx);
+ if(!visible){
  a.block(-1,-1,W+2,H+2,18,'#bdc9b7','#819d96','#587b7b',-18);
  // Sidewalk and street are scenery only; agents continue using the logical grid.
  a.tile(-6,-2,3.5,H+5,-10,'#587581');
  for(let y=0;y<H;y+=3)a.tile(-4.3,y,.1,1.3,-9,'#cfdbce');
  for(let y=14;y<17;y+=.5)a.tile(-5.8,y,3.1,.22,-8,'#f0e7ca');
+ }
+ const doors=visible?new Set(map.rooms.filter(r=>visible.has(r.id)).flatMap(r=>r.doors.map(([x,y])=>`${x},${y}`))):null;
+ const focusedRooms=visible?map.rooms.filter(r=>visible.has(r.id)):null;
+ const bounds=focusedRooms?{
+  minX:Math.min(...focusedRooms.map(r=>r.rect.x))-1,maxX:Math.max(...focusedRooms.map(r=>r.rect.x+r.rect.w))+1,
+  minY:Math.min(...focusedRooms.map(r=>r.rect.y))-1,maxY:Math.max(...focusedRooms.map(r=>r.rect.y+r.rect.h))+1,
+ }:null;
  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
   const t=map.tiles[idx(x,y)],r=map.rooms[map.roomAt[idx(x,y)]];
+  if(visible && !(r && visible.has(r.id))
+   && !((t===T.CORRIDOR || (t===T.DOOR && doors.has(`${x},${y}`)))
+    && x>=bounds.minX && x<=bounds.maxX && y>=bounds.minY && y<=bounds.maxY))continue;
   const p=r?PALETTES[r.id]:null;
   const color=p?((x+y)%2?p[0]:p[1]):t===T.CORRIDOR||t===T.DOOR?((x+y)%2?'#e5dbbd':'#eee4cb'):'#a7bcab';
   a.tile(x,y,1,1,0,color,'#718e7c22');
  }
- for(const cor of map.corridors){
+ for(const cor of visible?[]:map.corridors){
   a.line(project(cor.x,cor.y+1,1),project(cor.x+cor.w,cor.y+1,1),'#a9b39b',2);
   for(let x=cor.x+2;x<cor.x+cor.w;x+=5){const [px,py]=project(x,cor.y+1,2);a.text('›',px,py,'#81998b',14);}
  }
  // Garden fills the former unused upper wing beside Direction and Waiting.
+ if(!visible){
  a.block(31,1,14,3,5,'#80ae8b','#628c75','#527c6e');
  for(let x=32;x<45;x+=2)a.plant(x,2);
+ }
  return c;
 }
 
 function furnishings(map) {
  const items=[];
- const add=(x,y,draw)=>items.push({depth:x+y,draw});
  for(const room of map.rooms){
+  const add=(x,y,draw)=>items.push({roomId:room.id,depth:x+y,draw});
   const {x,y,w,h}=room.rect,p=PALETTES[room.id];
   // Back and left walls are cut away at doors; depth ordering keeps people behind furniture correctly.
   for(let k=0;k<w;k++){
@@ -84,11 +97,18 @@ function furnishings(map) {
 
 export function createRenderer(canvas,map){
  const ctx=canvas.getContext('2d');const bg=background(map);const furniture=furnishings(map);const gurneys={};let last=null;
+ let focusedBg=null,focusedKey='';
  function draw(view,positions,now,opts={}){
   const dt=last===null?0:Math.max(0,Math.min(.1,(now-last)/1000));last=now;
   ctx.setTransform(1,0,0,1,0,0);ctx.imageSmoothingEnabled=false;ctx.fillStyle='#83aaa6';ctx.fillRect(0,0,canvas.width,canvas.height);
-  const cam=opts.camera??{x:0,y:0,scale:1};ctx.save();ctx.translate(Math.round(cam.x),Math.round(cam.y));ctx.scale(cam.scale,cam.scale);ctx.drawImage(bg,0,0);
-  const art=createArt(ctx,now),cases=Object.values(view.cases),draws=furniture.map(f=>({depth:f.depth,fn:()=>f.draw(art)}));
+  const art=createArt(ctx,now),visible=opts.visibleRooms??new Set(map.rooms.map(r=>r.id));
+  const focused=Boolean(opts.visibleRooms)&&visible.size<map.rooms.length;
+  if(focused){
+   const key=[...visible].sort().join('|');
+   if(key!==focusedKey){focusedBg=background(map,visible);focusedKey=key;}
+  }
+  const cam=opts.camera??{x:0,y:0,scale:1};ctx.save();ctx.translate(Math.round(cam.x),Math.round(cam.y));ctx.scale(cam.scale,cam.scale);ctx.drawImage(focused?focusedBg:bg,0,0);
+  const cases=Object.values(view.cases??{}),draws=furniture.filter(f=>visible.has(f.roomId)).map(f=>({depth:f.depth,fn:()=>f.draw(art)}));
   const at=(id,dx,dy,z=0)=>{const r=map.rooms.find(r=>r.id===id).rect;return project(r.x+dx,r.y+dy,z);};
   const door=id=>map.rooms.find(r=>r.id===id).doors[0];
   const order=Object.keys(view.cases),slots={};
@@ -105,7 +125,7 @@ export function createRenderer(canvas,map){
    }});
   }
   for(const id of Object.keys(gurneys))if(!view.cases[id])delete gurneys[id];
-  const agents=Object.values(view.agents);
+  const agents=Object.values(view.agents??{});
   for(const a of agents){const p=positions[a.agentId];if(!p)continue;draws.push({depth:p.x+p.y+.6,fn:()=>{
    const role=a.role??'';const suit=role.includes('council')?'#b499d7':role.includes('implement')?'#72bcb0':role.includes('review')?'#8eabd2':'#fff5df';
    art.person({x:p.x+.5,y:p.y+.5,path:p.path??[],phase:now/100,id:hash(a.agentId),role:'doctor',room:a.room==='operating'?'surgery':a.room,color:suit});
@@ -115,10 +135,11 @@ export function createRenderer(canvas,map){
    if(a.sleeping)art.text('zz',px+15,py-48,'#4a657c',10);
    if(a.tool)drawEquipment(ctx,equipmentOf(opts.freezeTool??a.tool.name),px+15,py-25,now);
    if(a.holdingAt==='direction')drawEnvelope(ctx,px+12,py-16,true,now);
+   if(opts.badges){const runtime=a.runtime==='codex'?'Codex':'Claude';art.text(`${runtime} · ${String(a.sessionId??'').slice(-8)}`,px,py-63,'#fff1d0',9);}
   }});}
   draws.sort((a,b)=>a.depth-b.depth).forEach(d=>d.fn());
   // Room plates and room occupancy are derived from the same live snapshot as the characters.
-  for(const room of map.rooms){const {x,y,w,h}=room.rect;const [px,py]=project(x+w/2,y,48);const label=room.name;const width=label.length*6+20;
+  for(const room of map.rooms){if(!visible.has(room.id))continue;const {x,y,w,h}=room.rect;const [px,py]=project(x+w/2,y,48);const label=room.name;const width=label.length*6+20;
    art.rounded(px-width/2,py-13,width,21,3,'#34465a','#243449');art.text(label,px,py+1,'#fff1d0',10);
    const count=agents.filter(a=>a.room===room.id&&!a.leaving).length;const [bx,by]=project(x+w-1,y+h-.5,6);
    art.rounded(bx-12,by-10,24,16,2,'#fff0d0','#789a98');art.text(String(count),bx,by+1,'#46665f',10);
@@ -126,15 +147,18 @@ export function createRenderer(canvas,map){
   let row=0;
   for(const r of chipRowsOf(view.cases)){
    for(const [id,items,more]of[['waiting',r.waiting,r.waitingMore],['discharge',r.finished,r.finishedMore]]){
+    if(!items.length&&!more)continue;
     const [x,y]=at(id,2,1.4+row*.65,8);ctx.fillStyle=r.colour;ctx.fillRect(x-5,y,3,8);
     items.forEach((p,i)=>drawChip(ctx,x+i*17,y,p.id,id==='waiting'?'waiting':'done'));if(more)drawMore(ctx,x+items.length*17,y,more);
    }row++;
   }
   const pending=cases.some(c=>c.approval),answered=view.userT&&now-view.userT>=0&&now-view.userT<4000;
-  drawKeySwitch(ctx,...at('direction',5,2,25),pending);drawUserChair(ctx,...at('direction',3,1,10),Boolean(answered));
-  if(answered)art.text('RESPONDIDO',...at('direction',5,3,30),'#34865f',10);
-  if(pending&&!agents.some(a=>a.holdingAt==='direction'))drawEnvelope(ctx,...project(...door('direction'),10),true,now);
-  drawBell(ctx,...at('reception',4,2,28),(view.escalations??[]).length>0,now);
+  if(!focused||cases.length){
+   drawKeySwitch(ctx,...at('direction',5,2,25),pending);drawUserChair(ctx,...at('direction',3,1,10),Boolean(answered));
+   if(answered)art.text('RESPONDIDO',...at('direction',5,3,30),'#34865f',10);
+   if(pending&&!agents.some(a=>a.holdingAt==='direction'))drawEnvelope(ctx,...project(...door('direction'),10),true,now);
+   drawBell(ctx,...at('reception',4,2,28),(view.escalations??[]).length>0,now);
+  }
   let card=0;for(const c of cases){for(const accepted of [...(c.accepted??[]).map(()=>true),...(c.warnings??[]).filter(w=>w.state==='acceptable').map(()=>false)]){if(card<6)drawSealCard(ctx,...at('casefile',2+card++*.7,5,26),accepted);}}
   if(cases.some(c=>c.held==='discharge'))drawShutter(ctx,...project(...door('discharge'),5),25);
   for(const m of view.messages??[]){const age=now-m.t,a=positions[m.from],b=positions[m.to];if(age<0||age>=1600||!a||!b)continue;const from=project(a.x+.5,a.y+.5,35),to=project(b.x+.5,b.y+.5,35),k=age/1600;art.line(from,to,'#5f8e9270',2);drawCapsule(ctx,from[0]+(to[0]-from[0])*k,from[1]+(to[1]-from[1])*k);}

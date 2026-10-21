@@ -6,26 +6,32 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ed.svg?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![Node](https://img.shields.io/badge/Node-22-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org/)
 
-Pixel-art, read-only viewer that shows the agents of [subagent-pool](#hecho-con-subagent-pool) (Claude Code) working live, from local transcripts, in Docker.
-Unofficial and independent: not an Anthropic or OpenAI project.
+**El trabajo de los agentes, visto como un hospital vivo.** Un visor isométrico de solo lectura para Claude Code y Codex: personajes, oficinas, expedientes y fases que avanzan con la actividad real.
 
-![Hospital de agentes en funcionamiento](docs/demo.gif)
+[▶ Ver la demostración](docs/demo.gif) · [🚀 Instalar](#puesta-en-marcha) · [🧭 Entender las salas](#cómo-se-mapea-subagent-pool-a-las-salas) · [📚 Fundamentos y fuentes](docs/estado-del-arte.md)
 
-*Modo demo · datos sintéticos*
+![Recorrido animado por el hospital: vista general, quirófano, pool y consejo](docs/demo.gif)
 
-**Una vista isométrica en píxeles de los agentes de [subagent-pool](#hecho-con-subagent-pool).** Cada agente es un
-personaje, cada expediente una camilla y cada fase del plan un paciente. Node.js 22 sin dependencias, en Docker,
-solo lectura.
+*Demostración grabada en el navegador con datos sintéticos. 1200 × 685 px; 12 segundos. El modo live se alimenta de las transcripciones locales.*
 
+| Sesión observada | Lo que aparece |
+|---|---|
+| Claude Code o Codex con cualquier skill | El agente y las salas relacionadas con la actividad reconocida. El botón «Vista general» muestra el edificio completo, con las demás salas vacías. |
+| Sesión confirmada de subagent-pool | El hospital completo: recepción, espera, diagnóstico, quirófano, revisión, consejo, dirección, archivo y alta. |
+| `?mode=demo` | Todo el hospital con un recorrido sintético para explorar el diseño. |
+
+> **¿Solo ves una sala?** La vista enfocada muestra la actividad reconocida. Pulsa **«Vista general»** (⌂ o el botón «Hospital») para ver todas las habitaciones también en live. Eso no crea expedientes ni activa el flujo clínico en una sesión ordinaria. En Codex, el expediente debe incluir `Hospital session: codex-<CODEX_THREAD_ID>` y el visor necesita observar a los subagentes; el vínculo no se infiere del nombre de la skill.
+
+```text
+Claude Code ── ~/.claude/projects/*.jsonl ──┐
+                                             ├─(:ro)─► Node 22: tail → normalizar → reducir
+Codex ── ~/.codex/sessions/**/rollout*.jsonl ┘                         │ SSE /events
+expedientes plans/*-state.md ────────────────(:ro)──────────────────────┤
+                                                                        ▼
+                                               navegador: Canvas 2D isométrico
 ```
-subagent-pool (Conductor, planning, implement, review, consejo…)
-        │ escribe transcripciones .jsonl
-        ▼
-~/.claude/projects/  ──(montaje :ro)──►  servidor Node 22: tail → normalizar → reducir
-expedientes plans/*-state.md ──(:ro)──►        │  SSE /events
-                                               ▼
-                                 navegador: Canvas 2D isométrico, una sala por rol
-```
+
+**Privacidad y alcance.** El visor no ejecuta agentes ni modifica expedientes. El compose de demo no monta datos personales; el de live monta transcripciones y planes en solo lectura. Es un proyecto independiente, sin afiliación con Anthropic u OpenAI.
 
 ---
 
@@ -62,12 +68,28 @@ Capturas en modo demo, con datos sintéticos (`docs/screenshots/`):
 
 Las cápsulas que viajan por los tubos neumáticos son los `SendMessage` entre agentes. Los agentes que terminan salen del mapa tras unos segundos.
 
+## Claude, Codex y salas visibles
+
+El modo live descubre sesiones y subagentes de **ambos programas**, aunque usen otra skill o ninguna. Una sesión
+confirmada como subagent-pool abre el flujo hospitalario completo: recepción, espera, diagnóstico, intervención,
+revisión, consejo, dirección y alta. En una sesión sin esa confirmación, se muestran únicamente las salas pertinentes
+a los roles y herramientas observados. El modo demo conserva el hospital completo con datos sintéticos.
+
+La confirmación en Claude exige una invocación estructurada de la skill `subagent-pool`. En Codex exige un expediente
+activo y confinado con `Hospital session: codex-<CODEX_THREAD_ID>` en sus primeras 40 líneas, subagentes con roles
+observados y la finalización de al menos uno de ellos. `CODEX_THREAD_ID` lo proporciona Codex a la sesión. Si la skill
+no escribe esa cabecera, Codex sigue mostrando sus agentes en las salas pertinentes, sin abrir el flujo completo.
+La integración de subagent-pool en Codex debe escribir el valor real de `CODEX_THREAD_ID` al crear el expediente:
+por ejemplo, `Hospital session: codex-123e4567-e89b-42d3-a456-426614174000`. Mencionar la skill en un mensaje,
+usar un nombre parecido o tener un expediente antiguo no basta. El hospital no crea ni dirige agentes: solo
+representa la evidencia disponible.
+
 ## Puesta en marcha
 
 ```bash
-docker compose up -d --build          # demo: http://127.0.0.1:8700 (no monta nada del disco)
+docker compose up -d --build          # demo: http://127.0.0.1:8700/?mode=demo
 curl http://127.0.0.1:8700/api/health # {"ok":true,"mode":"demo"}
-docker compose -f docker-compose.yml -f compose.live.yml up -d --build   # live: lee transcripciones y expedientes (solo lectura)
+docker compose -f docker-compose.yml -f compose.live.yml up -d --build   # live: http://127.0.0.1:8700/?mode=live
 docker build --target test .          # pruebas unitarias dentro de Docker
 ```
 
@@ -80,9 +102,10 @@ Sin Docker, con Node 22: `npm start` y `npm test`.
 
 - **Demo** (por defecto, `docker-compose.yml`): escena sintética y determinista (`src/demo.js`). No monta ni lee nada
   del disco. Es la forma segura de ver la interfaz.
-- **Live** (`docker-compose.yml` + `compose.live.yml`): lee las transcripciones montadas en `/data/projects` y los
+- **Live** (`docker-compose.yml` + `compose.live.yml`): lee las transcripciones de Claude en `/data/projects`, las de
+  Codex en `/data/codex-sessions` y los
   expedientes de `HOSPITAL_CASE_DIRS`, con montajes `:ro`. El override fija `HOSPITAL_MODE=live`. Requisitos: que existan
-  `~/.claude/projects`, `~/Documentos/Docker` y `~/Documentos/IA` (si no existen, Docker los crea como root) y que los
+  `~/.claude/projects`, `~/.codex/sessions`, `~/Documentos/Docker` y `~/Documentos/IA` (si no existen, Docker los crea como root) y que los
   archivos sean legibles por el UID 1000 del contenedor. Para otras rutas, cambia `HOSPITAL_CASE_DIRS` y los montajes de
   `compose.live.yml` a la vez. En live aparece un selector de sesiones.
 - `HOSPITAL_MODE=live docker compose up -d` ya no activa live: sin el override no hay montajes y la vista queda vacía.
@@ -103,6 +126,7 @@ Parámetros de consulta (solo para pruebas y capturas; no envían nada al servid
 |---|---|---|
 | `HOSPITAL_MODE` | `demo` | Modo por defecto (`demo` o `live`) |
 | `HOSPITAL_WINDOW_H` | `6` | Horas de transcripción que se leen al arrancar |
+| `HOSPITAL_CODEX_DIR` | `/data/codex-sessions` en `compose.live.yml` | Raíz de sesiones de Codex; se monta con `:ro` |
 | `HOSPITAL_CASE_DIRS` | `$HOME/Documentos/Docker` y `$HOME/Documentos/IA` (en `compose.live.yml`) | Raíces absolutas separadas por `:`; de cada una se leen los `plans/*-state.md`. Cada raíz debe tener su montaje `:ro` en `compose.live.yml` |
 | `HOSPITAL_CONDUCTOR_IDLE_MIN` | `30` | Minutos sin eventos tras los que un Conductor inactivo sale del mapa. Un valor no válido (no entero ≥ 1) usa 30 y deja un aviso en el log |
 | `HOSPITAL_ALLOWED_HOSTS` | vacío | Nombres de host adicionales aceptados en la cabecera `Host`, separados por comas, sin puerto ni esquema. Ejemplo: `HOSPITAL_ALLOWED_HOSTS=192.0.2.10,box.lan` |
@@ -148,7 +172,7 @@ textos se muestran como texto plano, cortados a 256 KB.
 ## Pruebas
 
 ```bash
-npm test                          # node --test test/*.test.js (321 pruebas)
+npm test                          # node --test test/*.test.js
 docker build --target test .      # las mismas pruebas dentro de Docker
 ```
 
@@ -160,10 +184,13 @@ Sin dependencias de desarrollo: solo la biblioteca estándar de Node 22.
   escritorios del pool y el bind de WireGuard en un archivo de override. Las decisiones están en `docs/design/council/hospital-5c/`.
 - **Falso positivo de redacción.** La regla `api_key = valor` también tapa marcadores de posición como `api_key = value`.
   La corrección está prevista en 5c.
-- **Dependencia de un formato no documentado.** Las transcripciones de `~/.claude/projects` son el formato interno de
-  Claude Code. Si cambia, el modo live deja de reconocer agentes; el modo demo no se ve afectado.
-- **Plural y etiquetas.** La cabecera dice «1 agentes» con un solo agente y muestra «en vivo» también en demo (es el
-  estado de la conexión SSE, no de los datos).
+- **Formatos de transcripción internos.** Las transcripciones de `~/.claude/projects` y `~/.codex/sessions` pueden
+  cambiar entre versiones de Claude Code y Codex. Si cambian, el modo live puede dejar de reconocer ciertos eventos;
+  el modo demo no se ve afectado.
+- **Confirmación conservadora en Codex.** El hospital espera la cabecera `Hospital session`, un expediente reciente y
+  la finalización observada de un subagente con rol pertinente antes de abrir el flujo
+  completo. Mientras tanto muestra la actividad en las salas correspondientes, sin inventar pacientes ni altas.
+- **Etiquetas.** «En vivo» en demo representa el estado de la conexión SSE, no el origen de los datos.
 - **Solo probado en Linux.** En macOS y Windows (Docker Desktop) no se ha verificado el montaje de `${HOME}`.
 - **Acceso desde el móvil.** Requiere cambiar la publicación del puerto y `HOSPITAL_ALLOWED_HOSTS`; no hay login.
 

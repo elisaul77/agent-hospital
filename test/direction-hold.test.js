@@ -8,7 +8,7 @@ import { normalizeLine, parseLine } from '../src/normalize.js';
 
 const S = 'sess-hold';
 const T = 1_000_000;
-const run = (events) => events.reduce((s, ev) => reduce(s, ev), EMPTY_STATE());
+const run = (events) => events.reduce((s, ev) => reduce(s, ev), EMPTY_STATE({ trustedDemo: true }));
 const spawn = (agentId, subagentType, t = T) =>
   ({ t, kind: 'agent_spawn', sessionId: S, agentId, subagentType, parentAgentId: S, description: 'd' });
 

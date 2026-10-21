@@ -75,3 +75,12 @@ test('effectiveAgentType keeps agentType when the real type is not a known role'
   assert.equal(roles4.effectiveAgentType({}), undefined);
   assert.equal(roles4.effectiveAgentType(null), undefined);
 });
+
+test('ordinary workflows reserve rooms for observed planning, implementation and review roles only', () => {
+  for (const type of ['assistant', 'conductor', 'risk', 'council-risk', 'AgentArchitect']) {
+    assert.deepEqual(roleOf(type, undefined, 'unknown'), { role: 'consultant', room: 'specialists' }, type);
+  }
+  assert.equal(roleOf('planning-agent', undefined, 'other').room, 'diagnosis');
+  assert.equal(roleOf('implement-agent', undefined, 'unknown').room, 'operating');
+  assert.equal(roleOf('review-agent', undefined, 'other').room, 'radiology');
+});

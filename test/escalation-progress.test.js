@@ -9,7 +9,7 @@ import { ESCALATION_LABEL } from '../src/escalation.js';
 
 const T = 2_000_000;
 const S = 'S';
-const run = (evs) => evs.reduce((s, ev) => reduce(s, ev), EMPTY_STATE());
+const run = (evs) => evs.reduce((s, ev) => reduce(s, ev), EMPTY_STATE({ trustedDemo: true }));
 const spawn = (agentId, subagentType) => ({ t: T, kind: 'agent_spawn', sessionId: S, agentId, subagentType });
 const handback = (agentId, t, extra) => ({ t, kind: 'agent_done', sessionId: S, agentId, ...extra });
 const stalls = (s) => s.escalations.filter((e) => e.reason === 'stall').map((e) => e.label);

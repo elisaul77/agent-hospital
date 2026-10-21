@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
   parseCaseFile, parseAcceptedRisks, parseCaseDirs, resolveCaseDir, latestCaseFile, DEFAULT_CASE_DIRS,
@@ -278,6 +279,24 @@ test('loadCaseFile carries the progress next to the header fields', () => {
   const cf = casefileRev.loadCaseFile(file);
   assert.equal(cf.progress.currentId, '5');
   assert.deepEqual(cf.progress.doneIds, ['1', '2', '3b', '3', '4']);
+});
+
+test('loadCaseFile refuses a swapped symlink or FIFO without following or blocking', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hosp-case-swap-'));
+  const file = path.join(dir, 'current-state.md');
+  const other = path.join(dir, 'other-state.md');
+  try {
+    fs.writeFileSync(file, 'STATUS: IN_PROGRESS\n');
+    fs.writeFileSync(other, 'STATUS: COMPLETE\n');
+    const st = fs.statSync(file);
+    const expected = { file, dev: st.dev, ino: st.ino, size: st.size };
+    fs.unlinkSync(file);
+    fs.symlinkSync(other, file);
+    assert.throws(() => casefileRev.loadCaseFile(file, 1024, expected));
+    fs.unlinkSync(file);
+    execFileSync('mkfifo', [file]);
+    assert.throws(() => casefileRev.loadCaseFile(file, 1024, expected));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ---- Phase 1 (hospital-5b1): one shared confinement helper for plans/ files (planFileOf uses it) ----

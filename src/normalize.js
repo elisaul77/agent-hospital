@@ -8,6 +8,10 @@ import { approvalActionOf, approvalOfHandback, isBlockedHandback } from './escal
 import { isConsult, specialtyToken } from './roles.js';
 
 export const LABEL_MAX = 60;
+export function opaqueToolId(raw) {
+  return `claude-tool-${createHash('sha256').update(String(raw)).digest('hex').slice(0, 24)}`;
+}
+export const ownerKey = (sessionId, rawToolId) => `${sessionId}\0${rawToolId}`;
 const PATH_TOOLS = new Set(['Read', 'Edit', 'Write', 'MultiEdit', 'NotebookRead', 'NotebookEdit']);
 const SPAWN_TOOLS = new Set(['Agent', 'Task']);
 
@@ -39,12 +43,11 @@ function hostOf(u) {
   }
 }
 
-// Label shown next to a tool. Bash uses the model's own description, never the command line.
+// Label shown next to a tool. Free-form descriptions and search patterns stay private.
 export function labelOf(tool, input) {
   const inp = input && typeof input === 'object' ? input : {};
   if (PATH_TOOLS.has(tool)) return tailPath(inp.file_path ?? inp.notebook_path);
-  if (tool === 'Grep' || tool === 'Glob') return clip(inp.pattern);
-  if (tool === 'Bash' || SPAWN_TOOLS.has(tool)) return clip(inp.description);
+  if (tool === 'Grep' || tool === 'Glob' || tool === 'Bash' || SPAWN_TOOLS.has(tool)) return '';
   if (tool === 'SendMessage') return clip(inp.to);
   if (tool === 'WebFetch') return hostOf(inp.url);
   return '';
@@ -118,11 +121,12 @@ export function verdictOf(message, subagentType, mode) {
 
 // Events for a subagent's meta sidecar. `owners` maps a parent tool_use id to the agent that issued it.
 export function spawnEvents({ sessionId, agentId, meta, t, owners, mode, specialty = null }) {
-  const toolUseId = typeof meta?.toolUseId === 'string' && meta.toolUseId ? meta.toolUseId : null;
-  const parentAgentId = (toolUseId && owners?.get(toolUseId)) || sessionId;
+  const rawToolUseId = typeof meta?.toolUseId === 'string' && meta.toolUseId ? meta.toolUseId : null;
+  const parentAgentId = (rawToolUseId && owners?.get(ownerKey(sessionId, rawToolUseId))) || sessionId;
+  const toolUseId = rawToolUseId ? opaqueToolId(rawToolUseId) : null;
   const evs = [{
     t, kind: 'agent_spawn', sessionId, agentId,
-    subagentType: clip(meta?.agentType ?? 'unknown', 60), description: clip(meta?.description),
+    subagentType: clip(meta?.agentType ?? 'unknown', 60), description: '',
     parentAgentId, mode, specialty,
   }];
   if (toolUseId) evs.push({ t, kind: 'agent_link', sessionId, agentId, toolUseId });
@@ -173,7 +177,11 @@ export function normalizeLine(obj, ctx) {
         out.push({ ...base, kind: 'agent_done', ...(v ?? {}), ...blocked, ...progressOf(msg), ...reviewHash });
         continue;
       }
-      if (SPAWN_TOOLS.has(name) && ctx.owners) ctx.owners.set(b.id, ctx.agentId);
+      if (name === 'Skill' && typeof b.input?.skill === 'string') {
+        if (b.input.skill === 'subagent-pool') out.push({ t, kind: 'workflow_confirmed', sessionId: ctx.sessionId, workflow: 'subagent-pool', runtime: 'claude', reason: 'skill_invocation' });
+        else out.push({ t, kind: 'workflow_observed', sessionId: ctx.sessionId, workflow: 'other', runtime: 'claude', reason: 'other_skill_invocation' });
+      }
+      if (SPAWN_TOOLS.has(name) && ctx.owners) ctx.owners.set(ownerKey(ctx.sessionId, b.id), ctx.agentId);
       if (name === 'Bash') {
         const action = approvalActionOf(b.input?.command);
         if (action && !isConsult(ctx.subagentType, ctx.mode)) {
@@ -183,8 +191,13 @@ export function normalizeLine(obj, ctx) {
           if (ctx.isMain) continue;
         }
       }
-      out.push({ ...base, kind: 'tool_start', tool: clip(name, 40), label: labelOf(name, b.input), toolUseId: b.id });
-      if (name === 'SendMessage') out.push({ t, sessionId: ctx.sessionId, kind: 'message_send', from: ctx.agentId, to: clip(b.input?.to) });
+      out.push({ ...base, kind: 'tool_start', tool: clip(name, 40), label: labelOf(name, b.input), toolUseId: opaqueToolId(b.id) });
+      if (name === 'SendMessage') {
+        const to = b.input?.to;
+        if (typeof to === 'string' && /^[A-Za-z0-9_.-]{1,80}$/.test(to))
+          out.push({ t, sessionId: ctx.sessionId, kind: 'message_send', from: ctx.agentId,
+            to: to.startsWith('claude-') ? to : `claude-${to}` });
+      }
     }
     // Main session only: a turn that ends with a question and no tool call waits for the user.
     if (ctx.isMain && !blocks.some((b) => b?.type === 'tool_use')) {
@@ -194,7 +207,7 @@ export function normalizeLine(obj, ctx) {
   } else if (obj.type === 'user') {
     for (const b of blocks) {
       if (b?.type === 'tool_result' && typeof b.tool_use_id === 'string') {
-        out.push({ ...base, kind: 'tool_end', toolUseId: b.tool_use_id });
+        out.push({ ...base, kind: 'tool_end', toolUseId: opaqueToolId(b.tool_use_id) });
       }
     }
     // A typed message from the user (not a tool result, not a <tag> injection) answers the bell.

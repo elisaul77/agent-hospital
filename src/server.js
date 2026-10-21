@@ -8,7 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { reduce, derive, EMPTY_STATE, parseConductorIdleMin } from './state.js';
 import { startDemo } from './demo.js';
 import { createTailer } from './tail.js';
-import { parseCaseDirs, realRoots, resolveCaseDir, latestCaseFile, loadCaseFile, planFileOf, loadPlanPhases, phasesDoneFromFile } from './casefile.js';
+import { createCodexTailer } from './codex-tail.js';
+import { classifyWorkflow } from './workflow.js';
+import { parseCaseDirs, realRoots, resolveCaseDir, inside, loadCaseFile, planFileOf, loadPlanPhases, phasesDoneFromFile } from './casefile.js';
 import { createArchive, caseId, pruneAbsent, viewWithArchiveIds } from './archive.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -18,17 +20,20 @@ const HOST = process.env.HOST || '0.0.0.0';
 const MODES = ['demo', 'live'];
 const DEFAULT_MODE = process.env.HOSPITAL_MODE || 'demo';
 const PROJECTS_DIR = process.env.HOSPITAL_PROJECTS_DIR || '/data/projects';
+const CODEX_DIR = process.env.HOSPITAL_CODEX_DIR || '/data/codex-sessions';
 const WINDOW_H = Number(process.env.HOSPITAL_WINDOW_H || 6);
 const HEARTBEAT_MS = 15000;
 const IDLE_TICK_MS = 2000;
 const MAX_EVENTS_PER_DELTA = 20;
 const SESSION_RE = /^[A-Za-z0-9_.-]{1,80}$/;
 const CASE_REFRESH_MS = 3000;
+const safeErrorCode = (err) => typeof err?.code === 'string' && /^[A-Z0-9_]{1,40}$/.test(err.code)
+  ? err.code : 'unknown';
 // Case files are read only under these mounted roots (read-only binds in docker-compose).
 const CASE_DIRS = parseCaseDirs(process.env.HOSPITAL_CASE_DIRS);
-for (const bad of CASE_DIRS.rejected) console.error(`[hospital] HOSPITAL_CASE_DIRS entry ignored (not absolute): ${bad}`);
+for (const _bad of CASE_DIRS.rejected) console.error('[hospital] HOSPITAL_CASE_DIRS entry ignored (not absolute)');
 const CASE_ROOTS = realRoots(CASE_DIRS.roots);
-for (const r of CASE_DIRS.roots) if (!fs.existsSync(r)) console.error(`[hospital] case root not mounted: ${r}`);
+for (const r of CASE_DIRS.roots) if (!fs.existsSync(r)) console.error('[hospital] case root not mounted');
 const ARCHIVE = createArchive({ roots: CASE_ROOTS });
 // Phase 3: idle Conductors walk out after this long (HOSPITAL_CONDUCTOR_IDLE_MIN, default 30). Invalid = default + warning.
 const CONDUCTOR_IDLE = parseConductorIdleMin(process.env.HOSPITAL_CONDUCTOR_IDLE_MIN);
@@ -39,11 +44,11 @@ const viewOf = (state, now) => derive(state, now, { conductorIdleMs: CONDUCTOR_I
 const viewFor = (src, now) => viewWithArchiveIds(viewOf(src.state, now), src.caseKeys);
 
 if (!MODES.includes(DEFAULT_MODE)) {
-  console.error(`[hospital] HOSPITAL_MODE=${DEFAULT_MODE} is not one of ${MODES.join(', ')}`);
+  console.error('[hospital] HOSPITAL_MODE must be demo or live');
   process.exit(1);
 }
 if (!(WINDOW_H > 0)) {
-  console.error(`[hospital] HOSPITAL_WINDOW_H=${process.env.HOSPITAL_WINDOW_H} must be a positive number of hours`);
+  console.error('[hospital] HOSPITAL_WINDOW_H must be a positive number of hours');
   process.exit(1);
 }
 
@@ -63,9 +68,10 @@ function filterView(v, sid) {
   const agents = Object.fromEntries(Object.entries(v.agents).filter(([, a]) => a.sessionId === sid));
   const ids = new Set(Object.keys(agents));
   const cases = v.cases[sid] ? { [sid]: v.cases[sid] } : {};
-  const messages = v.messages.filter((m) => ids.has(m.from) || ids.has(m.to));
+  const messages = v.messages.filter((m) => ids.has(m.from) && (!v.agents[m.to] || ids.has(m.to)));
+  const workflows = v.workflows?.[sid] ? { [sid]: v.workflows[sid] } : {};
   const escalations = (v.escalations ?? []).filter((e) => e.sessionId === sid);
-  return { ...v, agents, cases, messages, escalations };
+  return { ...v, agents, cases, workflows, messages, escalations };
 }
 
 function sse(res, event, data) {
@@ -91,7 +97,7 @@ function parseAllowedHosts(value) {
     if (!item) continue;
     const m = HOST_RE.exec(item);
     if (!m || m[2] !== undefined) {
-      console.error(`[hospital] HOSPITAL_ALLOWED_HOSTS entry ignored: ${item} (give hostnames or addresses, no port)`);
+      console.error('[hospital] HOSPITAL_ALLOWED_HOSTS entry ignored (give hostnames or addresses, no port)');
       continue;
     }
     out.add(m[1]);
@@ -122,7 +128,9 @@ function originOk(value, hostHeader) {
   try {
     const u = new URL(value);
     if (!(u.protocol === 'http:' || u.protocol === 'https:') || !hostAllowed(u.host)) return false;
-    const hostPort = HOST_RE.exec(hostHeader)?.[2] ?? '80';
+    const hostMatch = HOST_RE.exec(hostHeader);
+    if (!hostMatch || u.hostname.toLowerCase() !== hostMatch[1].toLowerCase()) return false;
+    const hostPort = hostMatch[2] ?? '80';
     const originPort = u.port || (u.protocol === 'https:' ? '443' : '80');
     return Number(originPort) === Number(hostPort);
   } catch {
@@ -172,7 +180,7 @@ function handleDoc(res, url) {
   try {
     doc = ARCHIVE.readDoc(ids[0], kinds[0]);
   } catch (err) {
-    console.error(`[hospital] doc read failed: ${err.code ?? err.message}`);
+    console.error(`[hospital] doc read failed: ${safeErrorCode(err)}`);
     return docNotFound(res);
   }
   if (!doc) return docNotFound(res);
@@ -204,17 +212,30 @@ function handleArchive(res) {
 const sources = new Map();
 
 function createSource(mode) {
-  const src = { mode, state: EMPTY_STATE(), clients: new Set(), stops: [], tailer: null, cwds: new Map(), caseKeys: new Map() };
+  const src = { mode, state: EMPTY_STATE({ trustedDemo: mode === 'demo' }), clients: new Set(), stops: [], tailers: [], cwds: new Map(),
+    firstT: new Map(), caseKeys: new Map(), codexEvidence: new Map() };
 
   // Single entry point for every event (demo or live). Rejected events are logged with context.
   src.ingest = (evs) => {
     const applied = [];
     for (const ev of evs) {
       try {
+        if (ev.kind === 'agent_spawn' && ev.agentId === ev.sessionId && Number.isFinite(ev.t))
+          src.firstT.set(ev.sessionId, Math.min(src.firstT.get(ev.sessionId) ?? Infinity, ev.t));
         src.state = reduce(src.state, ev);
+        if (ev.sessionId?.startsWith('codex-') && ev.agentId && ev.agentId !== ev.sessionId) {
+          if (ev.kind === 'agent_spawn' && ev.parentAgentId?.startsWith('codex-')) {
+            const children = src.codexEvidence.get(ev.sessionId) ?? new Map();
+            children.set(ev.agentId, { parentAgentId: ev.parentAgentId, role: ev.subagentType, handback: false });
+            src.codexEvidence.set(ev.sessionId, children);
+          } else if (ev.kind === 'agent_done') {
+            const child = src.codexEvidence.get(ev.sessionId)?.get(ev.agentId);
+            if (child) child.handback = true;
+          }
+        }
         applied.push(ev);
       } catch (err) {
-        console.error(`[hospital] ${mode} rejected event kind=${ev.kind}: ${err.message}`);
+        console.error(`[hospital] ${mode} rejected event (${safeErrorCode(err)})`);
       }
     }
     if (!applied.length || src.clients.size === 0) return;
@@ -230,14 +251,19 @@ function createSource(mode) {
   if (mode === 'demo') {
     src.stops.push(startDemo((ev) => src.ingest([ev])));
   } else {
-    src.tailer = createTailer({
-      root: PROJECTS_DIR,
-      windowMs: WINDOW_H * 3600_000,
-      emit: (evs) => src.ingest(evs),
-      onCwd: (sid, cwd) => src.cwds.set(sid, cwd),
-    });
-    src.tailer.start();
-    src.stops.push(() => src.tailer.stop());
+    const onCwd = (sid, cwd, sessionStartedAt) => {
+      src.cwds.set(sid, cwd);
+      const startedAt = typeof sessionStartedAt === 'string' ? Date.parse(sessionStartedAt) : sessionStartedAt;
+      if (Number.isFinite(startedAt)) src.firstT.set(sid, Math.min(src.firstT.get(sid) ?? Infinity, startedAt));
+    };
+    src.tailers = [
+      createTailer({ root: PROJECTS_DIR, windowMs: WINDOW_H * 3600_000, emit: src.ingest, onCwd }),
+      createCodexTailer({ root: CODEX_DIR, windowMs: WINDOW_H * 3600_000, emit: src.ingest, onCwd }),
+    ];
+    for (const tailer of src.tailers) {
+      tailer.start();
+      src.stops.push(() => tailer.stop());
+    }
     const caseTimer = setInterval(() => refreshCaseFiles(src), CASE_REFRESH_MS);
     src.stops.push(() => clearInterval(caseTimer));
   }
@@ -247,46 +273,117 @@ function createSource(mode) {
   return src;
 }
 
-// Case files of the live sessions. The state file is re-read only when its key changes (path|mtime|size); the
-// plan it names (Phase 4b) is re-read only when the plan's own key changes. A plan-only change re-emits triage
-// (the phases) and nothing else, so an answered gate never rings again. Only events the reducer understands are
-// produced; the body of either file is never forwarded.
-// Phase 5 hardening: a session counts as live while its last transcript event is inside the window (the same
-// window as the session picker). Keys of sessions that left it are pruned, so the archive's `live` flag is accurate.
+// A case file belongs to a live session only when its cwd is observed, its file is confined and fresh,
+// and it is the sole eligible state file in that plans directory. We never bind the newest arbitrary file.
+function matchedCaseFile(plans, startedAt, now, sessionId) {
+  if (!Number.isFinite(startedAt) || startedAt <= 0) return null;
+  const names = [];
+  let dir;
+  let overflow = false;
+  let closeFailed = false;
+  try {
+    dir = fs.opendirSync(plans);
+    let entries = 0;
+    for (let ent = dir.readSync(); ent; ent = dir.readSync()) {
+      if (++entries > 256) { overflow = true; break; }
+      if (ent.name.endsWith('-state.md')) names.push(ent.name);
+    }
+  } catch (err) {
+    console.error(`[hospital] case directory read failed: ${err.code ?? 'unknown'}`);
+    return null;
+  } finally { try { dir?.closeSync(); } catch { closeFailed = true; } }
+  if (overflow) { console.error('[hospital] case directory entry cap exceeded (256)'); return null; }
+  if (closeFailed) { console.error('[hospital] case directory close failed'); return null; }
+  const matches = [];
+  for (const name of names) {
+    try {
+      const real = fs.realpathSync(path.join(plans, name));
+      if (path.dirname(real) !== plans || !inside(real, CASE_ROOTS)) continue;
+      const st = fs.statSync(real);
+      if (!st.isFile() || st.mtimeMs < startedAt || st.mtimeMs > now || now - st.mtimeMs > WINDOW_H * 3600_000) continue;
+      const fd = fs.openSync(real, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+      let head;
+      try {
+        const opened = fs.fstatSync(fd);
+        if (!opened.isFile() || opened.dev !== st.dev || opened.ino !== st.ino || opened.size !== st.size
+          || fs.realpathSync(path.join(plans, name)) !== real) continue;
+        const buf = Buffer.alloc(Math.min(st.size, 16 * 1024));
+        head = buf.subarray(0, fs.readSync(fd, buf, 0, buf.length, 0)).toString('utf8').split('\n').slice(0, 40).join('\n');
+      } finally { fs.closeSync(fd); }
+      const poolHeaders = /^Owner:\s*Conductor\s*$/m.test(head)
+        && /^Classification:\s*Tier [SML]\b/m.test(head) && /^Plan file:\s*\S+/m.test(head);
+      const boundSession = head.split('\n').map((line) => /^Hospital session:\s*(\S+)\s*$/.exec(line)?.[1]).find(Boolean);
+      if (poolHeaders) matches.push({ file: real, key: `${real}|${st.mtimeMs}|${st.size}`, modifiedAt: st.mtimeMs,
+        dev: st.dev, ino: st.ino, size: st.size, sessionBound: boundSession === sessionId });
+    } catch (err) {
+      if (err.code !== 'ENOENT') console.error(`[hospital] case candidate read failed: ${err.code ?? 'unknown'}`);
+    }
+  }
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function liveSessions(src, now = Date.now()) {
+  const cutoff = now - WINDOW_H * 3600_000;
+  return src.tailers.flatMap((tailer) => tailer.sessions()).filter((s) => s.lastT >= cutoff)
+    .sort((a, b) => b.lastT - a.lastT || a.sessionId.localeCompare(b.sessionId));
+}
+
+// Refresh only confirmed pool cases. Codex confirmation requires a fresh, confined state file plus
+// structural parent/child role evidence; Codex has no SubagentHandback event.
 function refreshCaseFiles(src) {
-  const windowMs = WINDOW_H * 3600_000;
   const now = Date.now();
-  const live = new Set(src.tailer ? src.tailer.sessions().filter((s) => now - s.lastT <= windowMs).map((s) => s.sessionId) : []);
+  const sessions = liveSessions(src, now);
+  const live = new Set(sessions.map((s) => s.sessionId));
   const dropped = pruneAbsent(src.caseKeys, live);
   if (dropped.length) console.log(`[hospital] case keys pruned (sessions left the window): ${dropped.length}`);
-  for (const [sid, cwd] of src.cwds) {
-    if (!live.has(sid)) continue;
+  for (const sid of src.codexEvidence.keys()) if (!live.has(sid)) src.codexEvidence.delete(sid);
+  const cwdCounts = new Map();
+  for (const sid of live) {
+    const cwd = src.cwds.get(sid);
+    if (cwd) cwdCounts.set(cwd, (cwdCounts.get(cwd) ?? 0) + 1);
+  }
+  for (const session of sessions) {
+    const sid = session.sessionId;
+    const cwd = src.cwds.get(sid);
+    const explicitClaudePool = session.provider === 'claude'
+      && src.state.workflows?.[sid]?.workflow === 'subagent-pool'
+      && src.state.workflows[sid].reason === 'skill_invocation';
+    if (!cwd || (cwdCounts.get(cwd) !== 1 && !explicitClaudePool)) continue;
     const plans = resolveCaseDir(cwd, CASE_ROOTS);
     if (!plans) continue;
-    const latest = latestCaseFile(plans, CASE_ROOTS);
-    if (!latest) continue;
+    const startedAt = src.firstT.get(sid);
+    const matched = matchedCaseFile(plans, startedAt, now, sid);
+    if (!matched) continue;
+    let confirmed = src.state.workflows?.[sid]?.workflow === 'subagent-pool';
+    if (!confirmed && session.provider === 'codex') {
+      const children = [...(src.codexEvidence.get(sid)?.values() ?? [])];
+      const poolRoles = children.some((a) => ['planning-agent', 'implement-agent', 'review-agent'].includes(a.role));
+      const handback = children.some((a) => a.handback && ['planning-agent', 'implement-agent', 'review-agent'].includes(a.role));
+      const result = classifyWorkflow({ runtime: 'codex', sessionId: sid, sessionStartedAt: startedAt,
+        observedAt: now, parentChild: children.length > 0, poolRoles, handback,
+        caseFile: { confined: true, active: true, sessionBound: matched.sessionBound,
+          sessionId: sid, poolHeaders: true, modifiedAt: matched.modifiedAt } });
+      if (result.workflow === 'subagent-pool') {
+        src.ingest([{ t: now, kind: 'workflow_confirmed', sessionId: sid, ...result }]);
+        confirmed = src.state.workflows?.[sid]?.workflow === 'subagent-pool';
+      }
+    }
+    if (!confirmed) continue;
     const prev = src.caseKeys.get(sid);
-    const stateChanged = !prev || prev.stateKey !== latest.key;
+    const stateChanged = !prev || prev.stateKey !== matched.key;
     if (!stateChanged && (planFileOf(plans, prev.cf.planFile, CASE_ROOTS)?.key ?? null) === prev.planKey) continue;
     let cf = prev?.cf;
     if (stateChanged) {
-      try {
-        cf = loadCaseFile(latest.file);
-      } catch (err) {
-        console.error(`[hospital] case file read failed for ${sid}: ${err.code ?? err.message}`);
-        continue;
-      }
+      try { cf = loadCaseFile(matched.file, 256 * 1024, matched); }
+      catch (err) { console.error(`[hospital] case file read failed for ${sid}: ${err.code ?? 'unknown'}`); continue; }
     }
     const plan = loadPlanPhases(plans, cf.planFile, CASE_ROOTS);
-    if (plan.error) console.error(`[hospital] plan read failed for ${sid}: ${plan.error}`);
+    if (plan.error) console.error(`[hospital] plan read failed for ${sid}`);
     if (!plan.key && cf.planFile) console.error(`[hospital] plan of ${sid} not readable or outside its plans dir (${cf.planFile.length} chars)`);
-    src.caseKeys.set(sid, { stateKey: latest.key, planKey: plan.key, cf, caseId: caseId(latest.file) });
+    src.caseKeys.set(sid, { stateKey: matched.key, planKey: plan.key, cf, caseId: caseId(matched.file) });
     const t = Date.now();
-    // The state file's own progress (Phase 4b revision): reducer takes max(transcripts, this count); COMPLETE = all done.
-    const evs = [{
-      t, kind: 'triage', sessionId: sid, tier: cf.tier, caseKind: cf.caseKind ?? '', phases: plan.phases,
-      filePhasesDone: phasesDoneFromFile(cf.progress, plan.phases), fileComplete: cf.progress.complete,
-    }];
+    const evs = [{ t, kind: 'triage', sessionId: sid, tier: cf.tier, caseKind: cf.caseKind ?? '',
+      phases: plan.phases, filePhasesDone: phasesDoneFromFile(cf.progress, plan.phases), fileComplete: cf.progress.complete }];
     if (stateChanged) {
       if (cf.status) evs.push({ t, kind: 'case_status', sessionId: sid, status: cf.status });
       evs.push({ t, kind: 'risk_accepted', sessionId: sid, items: cf.accepted });
@@ -339,7 +436,9 @@ function handleState(res, url) {
 // Session picker data: sessions tailed in the window (live mode only).
 function handleSessions(res) {
   const src = getSource('live');
-  return sendJson(res, 200, { root: PROJECTS_DIR, windowH: WINDOW_H, sessions: src.tailer.sessions() });
+  const sessions = liveSessions(src).map((s) => ({ sessionId: s.sessionId, provider: s.provider,
+    runtime: s.provider, project: String(s.project ?? '').slice(0, 60), name: String(s.project ?? s.provider ?? '').slice(0, 60), lastT: s.lastT }));
+  return sendJson(res, 200, { windowH: WINDOW_H, sessions });
 }
 
 function handleStatic(req, res, pathname) {
@@ -357,7 +456,7 @@ function handleStatic(req, res, pathname) {
   try {
     fs.stat(file, (err, st) => {
       if (err) {
-        if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') console.error(`[hospital] stat ${file}: ${err.message}`);
+        if (err.code !== 'ENOENT' && err.code !== 'ENOTDIR') console.error(`[hospital] static stat failed: ${err.code ?? 'unknown'}`);
         return sendJson(res, 404, { error: 'not found' });
       }
       if (!st.isFile()) return sendJson(res, 404, { error: 'not found' });
@@ -369,11 +468,11 @@ function handleStatic(req, res, pathname) {
       });
       if (req.method === 'HEAD') return res.end();
       fs.createReadStream(file)
-        .on('error', (e) => { console.error(`[hospital] read ${file}: ${e.message}`); res.destroy(); })
+        .on('error', (e) => { console.error(`[hospital] static read failed: ${e.code ?? 'unknown'}`); res.destroy(); })
         .pipe(res);
     });
   } catch (e) {
-    console.error(`[hospital] static ${file}: ${e.message}`);
+    console.error(`[hospital] static request failed: ${e.code ?? 'unknown'}`);
     return sendJson(res, 400, { error: 'bad path' });
   }
 }
@@ -423,10 +522,10 @@ process.on('SIGINT', shutdown);
 // Carry-over from Phase 1: an uncaught error means the process state is unknown. Log and exit(1);
 // Docker's restart policy brings it back.
 process.on('uncaughtException', (err) => {
-  console.error(`[hospital] uncaught exception: ${err.stack || err.message}`);
+  console.error(`[hospital] uncaught exception: ${safeErrorCode(err)}`);
   process.exit(1);
 });
 process.on('unhandledRejection', (err) => {
-  console.error(`[hospital] unhandled rejection: ${err?.stack || err}`);
+  console.error(`[hospital] unhandled rejection: ${safeErrorCode(err)}`);
   process.exit(1);
 });

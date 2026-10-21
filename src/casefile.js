@@ -158,10 +158,15 @@ export function latestCaseFile(plansDir, roots) {
 }
 
 /** Reads one confined state file (size-capped) and returns its header, accepted risks and gate action. */
-export function loadCaseFile(file, maxBytes = 256 * 1024) {
-  const fd = fs.openSync(file, 'r');
+export function loadCaseFile(file, maxBytes = 256 * 1024, expected = null) {
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
   try {
-    const buf = Buffer.alloc(Math.min(maxBytes, fs.fstatSync(fd).size));
+    const st = fs.fstatSync(fd);
+    if (!st.isFile() || (expected && (st.dev !== expected.dev || st.ino !== expected.ino
+      || st.size !== expected.size || fs.realpathSync(file) !== expected.file))) {
+      throw new Error('case file changed during read');
+    }
+    const buf = Buffer.alloc(Math.min(maxBytes, st.size));
     const n = fs.readSync(fd, buf, 0, buf.length, 0);
     const text = buf.subarray(0, n).toString('utf8');
     return {

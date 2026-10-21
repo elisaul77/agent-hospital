@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { takeCompleteLines, createTailer } from '../src/tail.js';
+import { opaqueToolId } from '../src/normalize.js';
 import { roleOf } from '../src/roles.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -37,6 +38,16 @@ function collector() {
   return { batches, all: () => batches.flat(), emit: (evs) => batches.push(evs), log: () => {} };
 }
 
+test('transcript read errors log codes without private root paths', async () => {
+  const secret = 'SYNTHETIC_PRIVATE_ROOT_SENTINEL_7301';
+  const logs = [];
+  const tailer = createTailer({ root: path.join(os.tmpdir(), secret), windowMs: 1000,
+    emit: () => {}, log: (line) => logs.push(line) });
+  await tailer.tick();
+  assert.ok(logs.length > 0);
+  assert.ok(!logs.join('\n').includes(secret));
+});
+
 test('tailer turns a real-shaped session and its subagent into spawn, link, verdict; no content leaks', async () => {
   const { root, proj, sub } = mkRoot();
   fs.copyFileSync(path.join(FIX, 'session-main.jsonl'), path.join(proj, 'sess-fixture-1.jsonl'));
@@ -46,9 +57,9 @@ test('tailer turns a real-shaped session and its subagent into spawn, link, verd
   const tailer = createTailer({ root, windowMs: 3_600_000, emit: c.emit, log: c.log, now: () => Date.now() });
   await tailer.tick();
   const evs = c.all();
-  const spawn = evs.find((e) => e.kind === 'agent_spawn' && e.agentId === 'fixrev1');
-  assert.equal(spawn.parentAgentId, 'sess-fixture-1');
-  assert.ok(evs.find((e) => e.kind === 'agent_link' && e.toolUseId === 'toolu_fixture_review_1'));
+  const spawn = evs.find((e) => e.kind === 'agent_spawn' && e.agentId === 'claude-fixrev1');
+  assert.equal(spawn.parentAgentId, 'claude-sess-fixture-1');
+  assert.ok(evs.find((e) => e.kind === 'agent_link' && e.toolUseId === opaqueToolId('toolu_fixture_review_1')));
   const done = evs.find((e) => e.kind === 'agent_done');
   assert.equal(done.verdict, 'FAILED');
   assert.equal(done.failureOrigin, 'implementation');
@@ -66,13 +77,13 @@ test('a partial last line is held back until its newline arrives, then emitted o
   const c = collector();
   const tailer = createTailer({ root, windowMs: 3_600_000, emit: c.emit, log: c.log });
   await tailer.tick();
-  assert.ok(!c.all().some((e) => e.toolUseId === 'toolu_fixture_review_1'), 'partial line must not emit');
+  assert.ok(!c.all().some((e) => e.toolUseId === opaqueToolId('toolu_fixture_review_1')), 'partial line must not emit');
   fs.appendFileSync(file, lines[2].slice(cut) + '\n');
   await tailer.tick();
-  const starts = c.all().filter((e) => e.kind === 'tool_start' && e.toolUseId === 'toolu_fixture_review_1');
+  const starts = c.all().filter((e) => e.kind === 'tool_start' && e.toolUseId === opaqueToolId('toolu_fixture_review_1'));
   assert.equal(starts.length, 1);
   await tailer.tick();
-  assert.equal(c.all().filter((e) => e.kind === 'tool_start' && e.toolUseId === 'toolu_fixture_review_1').length, 1, 'no duplicate on idle tick');
+  assert.equal(c.all().filter((e) => e.kind === 'tool_start' && e.toolUseId === opaqueToolId('toolu_fixture_review_1')).length, 1, 'no duplicate on idle tick');
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -83,10 +94,10 @@ test('a subagent file is not consumed until its meta sidecar exists', async () =
   const c = collector();
   const tailer = createTailer({ root, windowMs: 3_600_000, emit: c.emit, log: c.log });
   await tailer.tick();
-  assert.ok(!c.all().some((e) => e.agentId === 'fixrev1'), 'nothing for the child before its meta');
+  assert.ok(!c.all().some((e) => e.agentId === 'claude-fixrev1'), 'nothing for the child before its meta');
   fs.copyFileSync(path.join(FIX, 'subagents/agent-fixrev1.meta.json'), path.join(sub, 'agent-fixrev1.meta.json'));
   await tailer.tick();
-  assert.ok(c.all().some((e) => e.kind === 'agent_spawn' && e.agentId === 'fixrev1'));
+  assert.ok(c.all().some((e) => e.kind === 'agent_spawn' && e.agentId === 'claude-fixrev1'));
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -119,7 +130,7 @@ test('a reviewer outside the window is never tracked: no verdict is emitted and 
   const tailer = createTailer({ root, windowMs: 3_600_000, emit: c.emit, log: c.log, now: () => Date.now() });
   await tailer.tick();
   const evs = c.all();
-  assert.equal(evs.some((e) => e.agentId === 'fixrev1'), false, 'nothing from the old reviewer');
+  assert.equal(evs.some((e) => e.agentId === 'claude-fixrev1'), false, 'nothing from the old reviewer');
   assert.equal(evs.some((e) => e.kind === 'agent_done' && e.verdict), false, 'no verdict (undercount limit)');
   assert.doesNotThrow(() => evs.reduce(reduce, EMPTY_STATE()));
   fs.rmSync(root, { recursive: true, force: true });
@@ -134,8 +145,31 @@ test('a council member with a free name is spawned with its real type and lands 
   const c = collector();
   const tailer = createTailer({ root, windowMs: 3_600_000, emit: c.emit, log: c.log, now: () => Date.now() });
   await tailer.tick();
-  const spawn = c.all().find((e) => e.kind === 'agent_spawn' && e.agentId === 'fixcouncil1');
+  const spawn = c.all().find((e) => e.kind === 'agent_spawn' && e.agentId === 'claude-fixcouncil1');
   assert.equal(spawn.subagentType, 'council-architect');
   assert.deepEqual(roleOf(spawn.subagentType), { role: 'council-architect', room: 'council' });
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('Claude main and child IDs are runtime-prefixed, and an ordinary main stays generic', async () => {
+  const { root, proj, sub } = mkRoot();
+  fs.copyFileSync(path.join(FIX, 'session-main.jsonl'), path.join(proj, 'sess-fixture-1.jsonl'));
+  fs.copyFileSync(path.join(FIX, 'subagents/agent-fixrev1.jsonl'), path.join(sub, 'agent-fixrev1.jsonl'));
+  fs.copyFileSync(path.join(FIX, 'subagents/agent-fixrev1.meta.json'), path.join(sub, 'agent-fixrev1.meta.json'));
+  const c = collector();
+  const tailer = createTailer({ root, windowMs: 3_600_000, emit: c.emit, log: c.log });
+  try {
+    await tailer.tick();
+    const spawns = c.all().filter((e) => e.kind === 'agent_spawn');
+    const main = spawns.find((e) => e.agentId === 'claude-sess-fixture-1');
+    const child = spawns.find((e) => e.agentId === 'claude-fixrev1');
+    assert.equal(main.subagentType, 'assistant');
+    assert.equal(main.workflow, 'unknown');
+    assert.equal(main.runtime, 'claude');
+    assert.equal(child.sessionId, 'claude-sess-fixture-1');
+    assert.equal(child.parentAgentId, main.agentId);
+    assert.equal(tailer.sessions()[0].provider, 'claude');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

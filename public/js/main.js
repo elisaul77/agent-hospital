@@ -11,6 +11,7 @@ import { freshEscalations } from './bell.js';
 import { createBellSound } from './audio.js';
 import { specialtyDeskOf, phaseStateLabel } from './patients.js';
 import { createArchive } from './archive.js';
+import { activeAgent, roomForAgent, visibleRooms } from './focus.js';
 
 const WALK_SPEED = 4.5; // tiles per second
 const LOG_MAX = 14;
@@ -35,6 +36,23 @@ const SCENE = SCENE_NAME ? frozenSceneView(SCENE_NAME, FREEZE_NOW) : null;
 if (SCENE_NAME && !SCENE) console.error(`[hospital] unknown freezeScene ${SCENE_NAME}; known: ${SCENE_NAMES.join(', ')}`);
 const HOLD_ROOM = 'direction'; // a delegate that asked Direction walks to this room's door and holds there
 const hudView = () => (SCENE ? SCENE.view : view);
+const demoScene = () => currentMode !== 'live' || Boolean(SCENE);
+const roomSet = () => visibleRooms(hudView(), currentSession, { demo: demoScene() });
+const allRooms = new Set(ROOMS.map((room) => room.id));
+const displayRooms = () => overviewAll ? allRooms : roomSet();
+function sceneView() {
+  const v = hudView();
+  if (demoScene()) return v;
+  const workflows = v.workflows ?? {};
+  const agents = Object.fromEntries(Object.entries(v.agents ?? {}).filter(([, a]) =>
+    (!currentSession || a.sessionId === currentSession) &&
+    (workflows[a.sessionId]?.workflow === 'subagent-pool' || activeAgent(a))
+  ).map(([id, a]) => [id, { ...a, room: roomForAgent(a, workflows[a.sessionId]?.workflow),
+    runtime: a.runtime ?? workflows[a.sessionId]?.runtime ?? (a.sessionId?.startsWith('codex-') ? 'codex' : 'claude') }]));
+  const cases = Object.fromEntries(Object.entries(v.cases ?? {}).filter(([id, c]) =>
+    workflows[c.sessionId ?? id]?.workflow === 'subagent-pool' && (!currentSession || (c.sessionId ?? id) === currentSession)));
+  return { ...v, agents, cases, escalations: (v.escalations ?? []).filter((e) => cases[e.caseId]) };
+}
 
 const canvas = document.getElementById('world');
 const map = buildMap();
@@ -65,6 +83,8 @@ const CLICK_SLOP_PX = 6; // a pointer that moves less than this is a click, not 
 let es = null;
 let currentMode = null;
 let currentSession = null;
+let focusSignature = '';
+let overviewAll = false;
 
 // Escalation bell: sound is opt-in and persisted; the AudioContext is only created after a click (see below).
 const bellEl = document.getElementById('bell');
@@ -110,7 +130,7 @@ function ringBell() {
 
 // Ring once per new escalation. The first snapshot of a stream is silent: it only shows what is waiting.
 function updateBell(silent) {
-  const list = hudView().escalations ?? [];
+  const list = sceneView().escalations ?? [];
   const fresh = seenBell === null ? [] : freshEscalations(seenBell, list);
   if (fresh.length && !silent) ringBell();
   seenBell = new Set(list.map((e) => e.id));
@@ -122,6 +142,7 @@ function updateBell(silent) {
 
 // Bell click: centre the camera on the room that holds the first waiting escalation.
 function centerOnRoom(roomId) {
+  if (!displayRooms().has(roomId)) return;
   const room = ROOMS.find((r) => r.id === roomId);
   if (!room) return;
   zoom = Math.max(fitZoom(), Math.min(2.5, (innerWidth - 60) / ((room.rect.w + room.rect.h) * 22)));
@@ -140,17 +161,42 @@ function applyScene() {
   zoom = Math.min(2.5, SCENE.zoom);
   centerOnTile(SCENE.focus[0], SCENE.focus[1]);
 }
-function fitZoom() { return fitIsometric(innerWidth, innerHeight); }
+function focusBounds() {
+  const visible = roomSet();
+  const rooms = ROOMS.filter((r) => visible.has(r.id));
+  const points = rooms.flatMap((r) => {
+    const { x, y, w, h } = r.rect;
+    return [project(x, y, 58), project(x + w, y, 58), project(x, y + h), project(x + w, y + h)];
+  });
+  return { minX: Math.min(...points.map((p) => p[0])), maxX: Math.max(...points.map((p) => p[0])),
+    minY: Math.min(...points.map((p) => p[1])), maxY: Math.max(...points.map((p) => p[1])) };
+}
+function fitZoom() {
+  if (overviewAll || demoScene() || roomSet().size === ROOMS.length) return fitIsometric(innerWidth, innerHeight);
+  const b = focusBounds();
+  return Math.max(.15, Math.min(2.5, (innerWidth - 48) / (b.maxX - b.minX + 32),
+    (innerHeight - 228) / (b.maxY - b.minY + 32)));
+}
 function center() {
   camera.scale = zoom;
-  camera.x = Math.round((innerWidth - WORLD.width * zoom) / 2);
-  camera.y = Math.round(92 + (innerHeight - 228 - WORLD.height * zoom) / 2);
+  if (!overviewAll && !demoScene() && roomSet().size < ROOMS.length) {
+    const b = focusBounds();
+    camera.x = Math.round(innerWidth / 2 - (b.minX + b.maxX) * zoom / 2);
+    camera.y = Math.round(92 + (innerHeight - 228) / 2 - (b.minY + b.maxY) * zoom / 2);
+  } else {
+    camera.x = Math.round((innerWidth - WORLD.width * zoom) / 2);
+    camera.y = Math.round(92 + (innerHeight - 228 - WORLD.height * zoom) / 2);
+  }
   zoomEl.textContent = `${Math.round(zoom * 100)}%`;
-  document.getElementById('camera-title').textContent = 'Hospital Central';
+  document.getElementById('camera-title').textContent = overviewAll || demoScene() || roomSet().size === ROOMS.length ? 'Hospital Central' : 'Actividad observada';
   for (const [id, button] of roomButtons) { button.classList.toggle('selected', id === 'all'); button.setAttribute('aria-pressed', String(id === 'all')); }
 }
 function resize() { canvas.width = innerWidth; canvas.height = innerHeight; zoom = fitZoom(); center(); }
 function changeZoom(value) { zoom = Math.max(.15, Math.min(3, value)); center(); }
+function refreshFocus(force = false) {
+  const next = [...roomSet()].sort().join('|');
+  if (force || next !== focusSignature) { focusSignature = next; zoom = fitZoom(); center(); }
+}
 
 function showEmptyLog() {
   if (logEl.children.length) return;
@@ -164,16 +210,32 @@ function showEmptyLog() {
 function openStream() {
   if (es) es.close();
   seenBell = null;
-  view = { t: 0, now: 0, agents: {}, cases: {}, messages: [] };
+  view = { t: 0, now: 0, agents: {}, cases: {}, messages: [], workflows: {} };
+  for (const id of Object.keys(positions)) delete positions[id];
+  for (const key of Object.keys(seatOwner)) delete seatOwner[key];
+  selectedAgent = null;
+  document.getElementById('character-card').hidden = true;
+  focusSignature = '';
+  overviewAll = false;
+  refreshFocus(true);
+  updateHud();
+  updateBell(true);
+  seenBell = null; // the first snapshot of the new stream remains silent
   logEl.replaceChildren();
   showEmptyLog();
   es = connect({
     mode: currentMode,
     session: currentSession,
     onStatus: (s) => { statusEl.textContent = s; },
-    onSnapshot: (state) => { view = state; reconcile(); updateHud(); updateBell(true); },
+    onSnapshot: (state) => {
+      view = state;
+      for (const id of Object.keys(positions)) delete positions[id];
+      for (const key of Object.keys(seatOwner)) delete seatOwner[key];
+      refreshFocus(true); reconcile(); updateHud(); updateBell(true);
+    },
     onDelta: ({ events, state }) => {
       view = state;
+      refreshFocus();
       reconcile();
       updateHud();
       updateBell(false);
@@ -196,11 +258,12 @@ async function loadSessions() {
   for (const s of sessions) {
     const opt = document.createElement('option');
     opt.value = s.sessionId;
-    opt.textContent = `${s.sessionId.slice(0, 8)} · ${s.project}`;
+    opt.textContent = `${s.runtime === 'codex' ? 'Codex' : 'Claude'} · ${s.sessionId.slice(-8)}`;
     sessionEl.appendChild(opt);
   }
   sessionEl.value = [...sessionEl.options].some((o) => o.value === keep) ? keep : '';
   sessionEl.hidden = false;
+  if (currentSession && sessionEl.value !== currentSession) { currentSession = null; openStream(); }
 }
 
 async function init() {
@@ -253,7 +316,7 @@ function releaseSeat(agentId) {
 // Reconcile walking targets with the latest agent rooms. The room decides the target, except for a delegate
 // holding at the Direction door (holdingAt): it stands in the door tile until the user answers.
 function reconcile() {
-  const v = hudView();
+  const v = sceneView();
   for (const id of Object.keys(positions)) {
     if (!v.agents[id]) { releaseSeat(id); delete positions[id]; }
   }
@@ -285,7 +348,8 @@ function reconcile() {
       if (seat) seatOwner[seat.key] = a.agentId;
       tile = holding ? room.doors[0] : seat.tile;
     }
-    const path = findPath(W, H, (x, y) => walkable(map, x, y), from, { x: tile[0], y: tile[1] });
+    const goal = Array.isArray(tile) ? { x: tile[0], y: tile[1] } : tile;
+    const path = findPath(W, H, (x, y) => walkable(map, x, y), from, goal);
     if (!path) {
       console.error(`[hospital] no path for ${a.agentId} to ${key}`);
       p.path = [];
@@ -318,21 +382,45 @@ function step(now) {
     }
   }
   const frozen = FREEZE_TOOL || FREEZE_WARN || SCENE;
-  renderer.draw(WARN_VIEW ?? hudView(), positions, frozen ? FREEZE_NOW : Date.now(), { camera, freezeTool: FREEZE_TOOL });
+  renderer.draw(WARN_VIEW ?? sceneView(), positions, frozen ? FREEZE_NOW : Date.now(),
+    { camera, freezeTool: FREEZE_TOOL, visibleRooms: demoScene() || overviewAll ? undefined : roomSet() });
   requestAnimationFrame(step);
 }
 
 function updateHud() {
-  const v = hudView();
+  const v = sceneView();
   const agents = Object.values(v.agents);
-  countEl.textContent = `${agents.length} agentes`;
-  activityEl.textContent = `${Object.keys(v.cases).length} expedientes en planta`;
+  const focused = !demoScene() && roomSet().size < ROOMS.length;
+  document.body?.classList?.toggle('focused', focused);
+  document.getElementById('overview').hidden = focused;
+  document.getElementById('case-stats').hidden = focused;
+  soundEl.hidden = focused;
+  detailsEl.textContent = focused ? 'Actividad' : 'Casos';
+  document.getElementById('brand-subtitle').textContent = focused ? 'ACTIVIDAD OBSERVADA' : 'SUBAGENT POOL · HOSPITAL VIVO';
+  const badges = document.getElementById('session-badges');
+  badges.replaceChildren();
+  if (currentMode === 'live' && !currentSession) {
+    for (const id of new Set(agents.map((a) => a.sessionId))) {
+      const badge = document.createElement('span');
+      badge.textContent = `${v.workflows?.[id]?.runtime === 'codex' || id.startsWith('codex-') ? 'Codex' : 'Claude'} · ${id.slice(-8)}`;
+      badges.appendChild(badge);
+    }
+  }
+  countEl.textContent = `${agents.length} ${agents.length === 1 ? 'agente' : 'agentes'}`;
+  const caseCount = Object.keys(v.cases).length;
+  activityEl.textContent = focused
+    ? `${agents.length} ${agents.length === 1 ? 'agente' : 'agentes'} en actividad`
+    : `${caseCount} ${caseCount === 1 ? 'expediente' : 'expedientes'} en planta`;
   updateOverview(v);
   casesEl.replaceChildren();
   for (const c of Object.values(v.cases)) {
     const li = document.createElement('li');
     const warn = warningSummary(c);
-    li.textContent = `${c.caseId} · ${c.room} · ${c.status}${c.tier ? ` · Tier ${c.tier}` : ''}${warn ? ` · ${warn}` : ''}`;
+    const sessionId = c.sessionId ?? c.caseId;
+    const identity = currentMode === 'live'
+      ? `${v.workflows?.[sessionId]?.runtime === 'codex' || sessionId.startsWith('codex-') ? 'Codex' : 'Claude'} · ${sessionId.slice(-8)}`
+      : c.caseId;
+    li.textContent = `${identity} · ${c.room} · ${c.status}${c.tier ? ` · Tier ${c.tier}` : ''}${warn ? ` · ${warn}` : ''}`;
     // Phase 5: an archived case (a live state file) opens in the Archive room; demo cases have none.
     if (c.archiveId) {
       const open = document.createElement('button');
@@ -380,7 +468,7 @@ for (const room of [{id:'all', name:'Hospital'}, ...ROOMS]) {
   const title=document.createElement('b');title.textContent=room.name;
   const count=document.createElement('small');count.textContent=room.id==='all'?'VISTA GENERAL':'0 AGENTES';
   button.appendChild(icon);button.appendChild(title);button.appendChild(count);
-  button.addEventListener('click',()=>{ if(room.id==='all'){zoom=fitZoom();center();}else centerOnRoom(room.id); });
+  button.addEventListener('click',()=>{ if(room.id==='all'){overviewAll=true;zoom=fitZoom();center();updateOverview(sceneView());}else centerOnRoom(room.id); });
   roomButtons.set(room.id,button);document.getElementById('departments').appendChild(button);
 }
 let selectedAgent=null;
@@ -393,9 +481,9 @@ function paintCharacter(v) {
   document.getElementById('character-info').textContent=`${room} · ${a.status}${a.sleeping?' · en espera':''}${a.tool?'\n'+a.tool.name+(a.tool.label?': '+a.tool.label:''):''}`;
 }
 function pickCharacter(x,y) {
-  const hits=Object.values(hudView().agents).map(a=>{const p=positions[a.agentId];if(!p)return null;const [px,py]=project(p.x+.5,p.y+.5,28);return {a,d:Math.hypot(x-(camera.x+px*zoom),y-(camera.y+py*zoom))};}).filter(Boolean).sort((a,b)=>a.d-b.d);
+  const hits=Object.values(sceneView().agents).map(a=>{const p=positions[a.agentId];if(!p)return null;const [px,py]=project(p.x+.5,p.y+.5,28);return {a,d:Math.hypot(x-(camera.x+px*zoom),y-(camera.y+py*zoom))};}).filter(Boolean).sort((a,b)=>a.d-b.d);
   if(!hits.length || hits[0].d>Math.max(15,25*zoom))return false;
-  selectedAgent=hits[0].a.agentId;paintCharacter(hudView());return true;
+  selectedAgent=hits[0].a.agentId;paintCharacter(sceneView());return true;
 }
 function updateOverview(v) {
   const agents=Object.values(v.agents),cases=Object.values(v.cases),phases=cases.flatMap(c=>c.phases??[]);
@@ -404,7 +492,8 @@ function updateOverview(v) {
   document.getElementById('case-summary').textContent=cases.length?`${cases.length} expedientes en atención`:'Sin expedientes activos';
   document.getElementById('phase-summary').textContent=phases.length?`${done} de ${phases.length} fases hechas · ${waiting} en espera`:'Las fases aparecerán al recibir un plan.';
   document.getElementById('phase-progress').style.width=`${phases.length?done/phases.length*100:0}%`;
-  for(const [id,button]of roomButtons){if(id==='all')continue;const count=button.children[2];count.textContent=`${agents.filter(a=>a.room===id&&!a.leaving).length} AGENTES`;}
+  const visible = displayRooms();
+  for(const [id,button]of roomButtons){if(id==='all')continue;button.hidden=!visible.has(id);const count=button.children[2];const n=agents.filter(a=>a.room===id&&!a.leaving).length;count.textContent=`${n} ${n===1?'AGENTE':'AGENTES'}`;}
   paintCharacter(v);
 }
 document.getElementById('character-close').addEventListener('click',()=>{selectedAgent=null;document.getElementById('character-card').hidden=true;});
@@ -412,9 +501,9 @@ document.getElementById('fullscreen').addEventListener('click',async()=>{try{if(
 
 document.getElementById('plus').addEventListener('click', () => changeZoom(zoom * 1.25));
 document.getElementById('minus').addEventListener('click', () => changeZoom(zoom / 1.25));
-document.getElementById('reset').addEventListener('click', () => { zoom = fitZoom(); center(); });
+document.getElementById('reset').addEventListener('click', () => { overviewAll = true; zoom = fitZoom(); center(); updateOverview(sceneView()); });
 bellEl.addEventListener('click', () => {
-  const v = hudView();
+  const v = sceneView();
   const e = (v.escalations ?? [])[0];
   if (!e) return;
   centerOnRoom(e.reason === 'approve' ? 'direction' : v.cases[e.caseId]?.room);
@@ -454,7 +543,7 @@ canvas.addEventListener('pointerup', (e) => {
   const room = ROOMS.find((r) => r.id === ARCHIVE_ROOM);
   if (pickCharacter(e.clientX, e.clientY)) return;
   const { x: tx, y: ty } = screenToTile(e.clientX, e.clientY, camera);
-  if (room && tx >= room.rect.x && tx < room.rect.x + room.rect.w && ty >= room.rect.y && ty < room.rect.y + room.rect.h) {
+  if (room && roomSet().has(ARCHIVE_ROOM) && tx >= room.rect.x && tx < room.rect.x + room.rect.w && ty >= room.rect.y && ty < room.rect.y + room.rect.h) {
     archive.openList(null);
   }
 });
