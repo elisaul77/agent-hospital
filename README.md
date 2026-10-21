@@ -6,18 +6,23 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ed.svg?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![Node](https://img.shields.io/badge/Node-22-339933.svg?logo=node.js&logoColor=white)](https://nodejs.org/)
 
-Pixel-art, read-only viewer for Claude Code and Codex agents. It observes local transcripts in Docker, with the full hospital workflow for confirmed [subagent-pool](#hecho-con-subagent-pool) sessions.
-Unofficial and independent: not an Anthropic or OpenAI project.
+**El trabajo de los agentes, visto como un hospital vivo.** Un visor isométrico de solo lectura para Claude Code y Codex: personajes, oficinas, expedientes y fases que avanzan con la actividad real.
 
-![Hospital de agentes en funcionamiento](docs/demo.gif)
+[▶ Ver la demostración](docs/demo.gif) · [🚀 Instalar](#puesta-en-marcha) · [🧭 Entender las salas](#cómo-se-mapea-subagent-pool-a-las-salas) · [📚 Fundamentos y fuentes](docs/estado-del-arte.md)
 
-*Modo demo · datos sintéticos*
+![Recorrido animado por el hospital: vista general, quirófano, pool y consejo](docs/demo.gif)
 
-**Una vista isométrica en píxeles de agentes de Claude Code y Codex.** Cada agente es un personaje. Cuando hay evidencia
-de [subagent-pool](#hecho-con-subagent-pool), cada expediente es una camilla y cada fase del plan un paciente. Otras
-sesiones muestran solo las salas relacionadas con su actividad. Node.js 22 sin dependencias, en Docker, solo lectura.
+*Demostración grabada en el navegador con datos sintéticos. 1200 × 685 px; 12 segundos. El modo live se alimenta de las transcripciones locales.*
 
-```
+| Sesión observada | Lo que aparece |
+|---|---|
+| Claude Code o Codex con cualquier skill | El agente y las salas relacionadas con la actividad reconocida. El botón «Vista general» muestra el edificio completo, con las demás salas vacías. |
+| Sesión confirmada de subagent-pool | El hospital completo: recepción, espera, diagnóstico, quirófano, revisión, consejo, dirección, archivo y alta. |
+| `?mode=demo` | Todo el hospital con un recorrido sintético para explorar el diseño. |
+
+> **¿Solo ves una sala?** La vista enfocada muestra la actividad reconocida. Pulsa **«Vista general»** (⌂ o el botón «Hospital») para ver todas las habitaciones también en live. Eso no crea expedientes ni activa el flujo clínico en una sesión ordinaria. En Codex, el expediente debe incluir `Hospital session: codex-<CODEX_THREAD_ID>` y el visor necesita observar a los subagentes; el vínculo no se infiere del nombre de la skill.
+
+```text
 Claude Code ── ~/.claude/projects/*.jsonl ──┐
                                              ├─(:ro)─► Node 22: tail → normalizar → reducir
 Codex ── ~/.codex/sessions/**/rollout*.jsonl ┘                         │ SSE /events
@@ -25,6 +30,8 @@ expedientes plans/*-state.md ────────────────(:r
                                                                         ▼
                                                navegador: Canvas 2D isométrico
 ```
+
+**Privacidad y alcance.** El visor no ejecuta agentes ni modifica expedientes. El compose de demo no monta datos personales; el de live monta transcripciones y planes en solo lectura. Es un proyecto independiente, sin afiliación con Anthropic u OpenAI.
 
 ---
 
@@ -80,9 +87,9 @@ representa la evidencia disponible.
 ## Puesta en marcha
 
 ```bash
-docker compose up -d --build          # demo: http://127.0.0.1:8700 (no monta nada del disco)
+docker compose up -d --build          # demo: http://127.0.0.1:8700/?mode=demo
 curl http://127.0.0.1:8700/api/health # {"ok":true,"mode":"demo"}
-docker compose -f docker-compose.yml -f compose.live.yml up -d --build   # live: lee transcripciones y expedientes (solo lectura)
+docker compose -f docker-compose.yml -f compose.live.yml up -d --build   # live: http://127.0.0.1:8700/?mode=live
 docker build --target test .          # pruebas unitarias dentro de Docker
 ```
 
@@ -183,8 +190,7 @@ Sin dependencias de desarrollo: solo la biblioteca estándar de Node 22.
 - **Confirmación conservadora en Codex.** El hospital espera la cabecera `Hospital session`, un expediente reciente y
   la finalización observada de un subagente con rol pertinente antes de abrir el flujo
   completo. Mientras tanto muestra la actividad en las salas correspondientes, sin inventar pacientes ni altas.
-- **Plural y etiquetas.** La cabecera dice «1 agentes» con un solo agente y muestra «en vivo» también en demo (es el
-  estado de la conexión SSE, no de los datos).
+- **Etiquetas.** «En vivo» en demo representa el estado de la conexión SSE, no el origen de los datos.
 - **Solo probado en Linux.** En macOS y Windows (Docker Desktop) no se ha verificado el montaje de `${HOME}`.
 - **Acceso desde el móvil.** Requiere cambiar la publicación del puerto y `HOSPITAL_ALLOWED_HOSTS`; no hay login.
 
