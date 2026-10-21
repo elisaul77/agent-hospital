@@ -2,14 +2,14 @@
 
 Formato: [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/). Versiones con [SemVer](https://semver.org/lang/es/).
 
-## [0.2.0] - pendiente de publicación
+## [0.2.0] - 2026-10-21
 
 ### Añadido
 
 - Observación de sesiones y subagentes de Codex junto con los de Claude Code, a partir de transcripciones locales
   montadas en solo lectura. Los identificadores de sesión separan ambos programas.
 - Vista enfocada para sesiones ajenas a subagent-pool: muestra las salas pertinentes a la actividad observada;
-  el hospital completo se reserva para sesiones con confirmación estructurada de subagent-pool.
+  el flujo clínico completo se reserva para sesiones con confirmación estructurada de subagent-pool.
 - «Vista general» muestra todas las habitaciones también en una sesión ordinaria; la vista enfocada conserva solo
   las salas con actividad. Contadores en singular cuando hay un agente.
 - Banner y GIF de demo nuevos, documentación de Claude y Codex y enlace al expediente de subagent-pool.
