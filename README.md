@@ -22,11 +22,11 @@ Creado y mantenido por **[Eli Saul Florez Perez (@elisaul77)](https://github.com
 
 | Sesión observada | Lo que aparece |
 |---|---|
-| Claude Code o Codex con cualquier skill | El agente y las salas relacionadas con la actividad reconocida. El botón «Vista general» muestra el edificio completo, con las demás salas vacías. |
+| Claude Code o Codex con cualquier skill | El hospital completo al cargar, con el agente en la sala relacionada con su actividad reconocida. Las demás salas permanecen vacías. |
 | Sesión confirmada de subagent-pool | El hospital completo: recepción, espera, diagnóstico, quirófano, revisión, consejo, dirección, archivo y alta. |
 | `?mode=demo` | Todo el hospital con un recorrido sintético para explorar el diseño. |
 
-> **¿Solo ves una sala?** La vista enfocada muestra la actividad reconocida. Pulsa **«Vista general»** (⌂ o el botón «Hospital») para ver todas las habitaciones también en live. Eso no crea expedientes ni activa el flujo clínico en una sesión ordinaria. En Codex, el expediente debe incluir `Hospital session: codex-<CODEX_THREAD_ID>` y el visor necesita observar a los subagentes; el vínculo no se infiere del nombre de la skill.
+> **Vista general en live.** El hospital completo aparece desde la carga. Pulsa una sala para acercarte y **«Vista general»** (⌂ o el botón «Hospital») para volver al edificio completo. Las salas vacías no crean expedientes ni activan el flujo clínico en una sesión ordinaria. En Codex, el expediente debe incluir `Hospital session: codex-<CODEX_THREAD_ID>` y el visor necesita observar a los subagentes; el vínculo no se infiere del nombre de la skill.
 
 ```text
 Claude Code ── ~/.claude/projects/*.jsonl ──┐

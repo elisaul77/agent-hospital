@@ -253,7 +253,7 @@ test('HUD: snapshot and delta reach the DOM; zoom, reset, drag, details; isometr
   assert.ok(log.smoothing.length > 0 && log.smoothing.every((v) => v === false), 'smoothing restored after resize');
 });
 
-test('live HUD focuses observed rooms and clears focus on session switch', async () => {
+test('live HUD opens the whole hospital and keeps overview on session switch', async () => {
   const log = newLog();
   const ctx = makeContext(log);
   const listeners = {}, elements = {}, streams = [];
@@ -305,17 +305,17 @@ test('live HUD focuses observed rooms and clears focus on session switch', async
     streams[0].handlers.snapshot({ data: JSON.stringify(snapshot('codex-12345678', 'diagnosis', 'codex')) });
     const roomButton = (name) => byId('departments').children.find((b) => b.children[1].textContent === name);
     assert.equal(roomButton('Diagnóstico').hidden, false);
-    assert.equal(roomButton('Consejo').hidden, true);
-    assert.equal(roomButton('Alta').hidden, true);
-    assert.equal(byId('overview').hidden, true);
-    assert.equal(byId('case-stats').hidden, true);
-    assert.match(byId('activity').textContent, /1 agente en actividad/);
+    assert.equal(roomButton('Consejo').hidden, false);
+    assert.equal(roomButton('Alta').hidden, false);
+    assert.equal(byId('overview').hidden, false);
+    assert.equal(byId('case-stats').hidden, false);
+    assert.equal(byId('activity').textContent, '0 expedientes en planta');
     assert.equal(byId('session-badges').children[0].textContent, 'Codex · 12345678');
     const fittedZoom = Number.parseInt(byId('zoom').textContent);
     listeners['plus:click']();
-    assert.ok(Number.parseInt(byId('zoom').textContent) > fittedZoom, 'focused room still zooms on click');
+    assert.ok(Number.parseInt(byId('zoom').textContent) > fittedZoom, 'zoom controls still work');
     listeners['reset:click']();
-    assert.ok(Number.parseInt(byId('zoom').textContent) < fittedZoom, 'Vista general fits the whole hospital');
+    assert.equal(Number.parseInt(byId('zoom').textContent), fittedZoom, 'Vista general restores the initial fit');
     assert.equal(roomButton('Consejo').hidden, false, 'Vista general exposes the Council room');
     assert.equal(roomButton('Alta').hidden, false, 'Vista general exposes Discharge');
     log.text.length = 0;
@@ -342,14 +342,14 @@ test('live HUD focuses observed rooms and clears focus on session switch', async
     assert.equal(streams[1].url, '/events?mode=live&session=claude-87654321');
     assert.equal(byId('count').textContent, '0 agentes');
     assert.equal(byId('cases').children.length, 0);
-    assert.equal(byId('activity').textContent, '0 agentes en actividad');
+    assert.equal(byId('activity').textContent, '0 expedientes en planta');
     assert.equal(byId('session-badges').children.length, 0);
     assert.equal(byId('bell').hidden, true);
     assert.equal(byId('bell').textContent, '');
-    assert.equal(roomButton('Diagnóstico').hidden, true);
-    assert.equal(roomButton('Consejo').hidden, true);
+    assert.equal(roomButton('Diagnóstico').hidden, false);
+    assert.equal(roomButton('Consejo').hidden, false);
     streams[1].handlers.snapshot({ data: JSON.stringify(snapshot('claude-87654321', 'radiology', 'claude')) });
-    assert.equal(roomButton('Diagnóstico').hidden, true);
+    assert.equal(roomButton('Diagnóstico').hidden, false);
     assert.equal(roomButton('Radiología / Revisión').hidden, false);
   } finally {
     globalThis.setInterval = oldInterval;

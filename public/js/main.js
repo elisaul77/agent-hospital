@@ -84,7 +84,7 @@ let es = null;
 let currentMode = null;
 let currentSession = null;
 let focusSignature = '';
-let overviewAll = false;
+let overviewAll = true;
 
 // Escalation bell: sound is opt-in and persisted; the AudioContext is only created after a click (see below).
 const bellEl = document.getElementById('bell');
@@ -216,7 +216,7 @@ function openStream() {
   selectedAgent = null;
   document.getElementById('character-card').hidden = true;
   focusSignature = '';
-  overviewAll = false;
+  overviewAll = true;
   refreshFocus(true);
   updateHud();
   updateBell(true);
@@ -390,7 +390,7 @@ function step(now) {
 function updateHud() {
   const v = sceneView();
   const agents = Object.values(v.agents);
-  const focused = !demoScene() && roomSet().size < ROOMS.length;
+  const focused = !overviewAll && !demoScene() && roomSet().size < ROOMS.length;
   document.body?.classList?.toggle('focused', focused);
   document.getElementById('overview').hidden = focused;
   document.getElementById('case-stats').hidden = focused;
